@@ -28,6 +28,9 @@
 #include <QPrintDialog>
 #include <QPrintPreviewDialog>
 #include <QPrinter>
+#include <QPdfWriter>
+#include <QPageSize>
+#include <QPageLayout>
 #include <QImage>
 #include <QTextListFormat>
 #include <QPainter>
@@ -48,11 +51,15 @@
 #include <QCloseEvent>
 #include <QTextFrame>
 #include <QTextBlockFormat>
+#include <QListWidget>
+#include <QAbstractTextDocumentLayout>
+#include <QMap>
 #include <algorithm>
 #include <functional>
 
 // Forward declaration
 class EditorView;
+class MicroWriter;
 
 // Layout Mode Enum
 enum LayoutMode {
@@ -76,9 +83,9 @@ public:
         : QTextEdit(parent), filePath(""), isPrintLayout(false), encodingName("UTF-8"), eolFormat(EolLf),
           _headerText(""), _footerText("") {
         
-        // Default document frame margins (in pixels)
+        // Default document frame margins (in pixels) - Left set to 0 for flush start
         QTextFrameFormat fmt = document()->rootFrame()->frameFormat();
-        fmt.setLeftMargin(20);
+        fmt.setLeftMargin(0);
         fmt.setRightMargin(20);
         document()->rootFrame()->setFrameFormat(fmt);
     }
@@ -202,7 +209,7 @@ public:
     Ruler(QWidget *parent = nullptr) : QWidget(parent), editor(nullptr), draggingLeft(false), draggingRight(false) {
         setFixedHeight(28);
         setMouseTracking(true);
-        leftMarginPos = 30;
+        leftMarginPos = 0; // Starts at 0 to match EditorView left margin
         rightMarginPos = 700;
     }
 
@@ -216,7 +223,7 @@ public:
         if (!editor) return;
         leftMarginPos = qRound(editor->leftMarginPixels());
         rightMarginPos = width() - qRound(editor->rightMarginPixels());
-        leftMarginPos = qBound(5, leftMarginPos, width() - 50);
+        leftMarginPos = qBound(0, leftMarginPos, width() - 50);
         rightMarginPos = qBound(leftMarginPos + 40, rightMarginPos, width() - 5);
     }
 
@@ -280,7 +287,7 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override {
         int x = event->pos().x();
         if (draggingLeft) {
-            leftMarginPos = qBound(5, x, rightMarginPos - 40);
+            leftMarginPos = qBound(0, x, rightMarginPos - 40);
             if (editor) {
                 editor->setLeftMarginPixels(leftMarginPos);
             }
@@ -661,9 +668,8 @@ private slots:
         QString findStr = tableWidget->item(row, 1)->text();
         QString repStr = tableWidget->item(row, 2)->text();
 
-        accept(); // Close cheat sheet dialog
+        accept();
 
-        // Open Find & Replace dialog pre-filled
         FindReplaceDialog *dlg = new FindReplaceDialog(editor, parentWidget());
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setPattern(findStr, repStr, true);
@@ -673,6 +679,96 @@ private slots:
 private:
     EditorView *editor;
     QTableWidget *tableWidget;
+};
+
+class ToolbarCustomizeDialog : public QDialog {
+    Q_OBJECT
+public:
+    ToolbarCustomizeDialog(QToolBar *targetToolbar, const QList<QAction*> &allActions, QWidget *parent = nullptr)
+        : QDialog(parent), toolbar(targetToolbar), availableActions(allActions) {
+        setWindowTitle(QString("Customize Toolbar - %1").arg(targetToolbar->windowTitle()));
+        resize(500, 350);
+
+        QHBoxLayout *mainLayout = new QHBoxLayout(this);
+
+        QVBoxLayout *availLayout = new QVBoxLayout();
+        availLayout->addWidget(new QLabel("Available Actions:", this));
+        availableList = new QListWidget(this);
+        availLayout->addWidget(availableList);
+
+        QVBoxLayout *activeLayout = new QVBoxLayout();
+        activeLayout->addWidget(new QLabel("Active Actions in Toolbar:", this));
+        activeList = new QListWidget(this);
+        activeLayout->addWidget(activeList);
+
+        QVBoxLayout *btnLayout = new QVBoxLayout();
+        QPushButton *addBtn = new QPushButton("Add ->", this);
+        QPushButton *removeBtn = new QPushButton("<- Remove", this);
+        btnLayout->addStretch();
+        btnLayout->addWidget(addBtn);
+        btnLayout->addWidget(removeBtn);
+        btnLayout->addStretch();
+
+        mainLayout->addLayout(availLayout);
+        mainLayout->addLayout(btnLayout);
+        mainLayout->addLayout(activeLayout);
+
+        populateLists();
+
+        connect(addBtn, &QPushButton::clicked, this, &ToolbarCustomizeDialog::addActionToToolbar);
+        connect(removeBtn, &QPushButton::clicked, this, &ToolbarCustomizeDialog::removeActionFromToolbar);
+    }
+
+private:
+    void populateLists() {
+        availableList->clear();
+        activeList->clear();
+
+        QList<QAction*> currentToolbarActions = toolbar->actions();
+
+        for (QAction *act : availableActions) {
+            if (!act || act->text().isEmpty()) continue;
+            
+            QString cleanText = act->text();
+            cleanText.remove('&');
+
+            QListWidgetItem *item = new QListWidgetItem(cleanText);
+            item->setData(Qt::UserRole, QVariant::fromValue(act));
+
+            if (currentToolbarActions.contains(act)) {
+                activeList->addItem(item);
+            } else {
+                availableList->addItem(item);
+            }
+        }
+    }
+
+    void addActionToToolbar() {
+        QListWidgetItem *item = availableList->currentItem();
+        if (!item) return;
+
+        QAction *act = item->data(Qt::UserRole).value<QAction*>();
+        if (act) {
+            toolbar->addAction(act);
+            populateLists();
+        }
+    }
+
+    void removeActionFromToolbar() {
+        QListWidgetItem *item = activeList->currentItem();
+        if (!item) return;
+
+        QAction *act = item->data(Qt::UserRole).value<QAction*>();
+        if (act) {
+            toolbar->removeAction(act);
+            populateLists();
+        }
+    }
+
+    QToolBar *toolbar;
+    QList<QAction*> availableActions;
+    QListWidget *availableList;
+    QListWidget *activeList;
 };
 
 class MicroWriter : public QMainWindow {
@@ -707,7 +803,7 @@ public:
         });
 
         createMenus();
-        createToolBar();
+        loadToolbarSettings();
         createStatusBar();
 
         resize(1100, 750);
@@ -722,6 +818,136 @@ public:
         }
     }
 
+    void openFilePath(const QString &fileName) {
+        if (fileName.isEmpty()) return;
+
+        QFile file(fileName);
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            EditorView *editor = new EditorView(this);
+            
+            QByteArray rawData = file.readAll();
+            if (rawData.contains("\r\n")) editor->eolFormat = EolCrlf;
+            else if (rawData.contains('\r') && !rawData.contains('\n')) editor->eolFormat = EolCr;
+            else editor->eolFormat = EolLf;
+
+            QTextStream in(&rawData);
+            in.setEncoding(QStringConverter::encodingForName(editor->encodingName.toUtf8()).value_or(QStringConverter::Utf8));
+            QString content = in.readAll();
+
+            connect(editor, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
+            connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
+
+            connect(editor->document(), &QTextDocument::modificationChanged, this, [=](bool changed){
+                int idx = tabWidget->indexOf(editor);
+                if (idx != -1) {
+                    QFileInfo fi(editor->filePath);
+                    QString name = editor->filePath.isEmpty() ? "Untitled" : fi.fileName();
+                    if (changed) name += " *";
+                    tabWidget->setTabText(idx, name);
+                }
+            });
+
+            if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
+                editor->setHtml(content);
+            } else if (fileName.endsWith(".md")) {
+                editor->setMarkdown(content);
+            } else {
+                editor->setPlainText(content);
+            }
+            
+            editor->filePath = fileName;
+            editor->document()->setModified(false);
+            
+            QFileInfo fileInfo(fileName);
+            
+            // If current tab is empty and untitled, remove it
+            if (tabWidget->count() == 1) {
+                EditorView *firstEd = qobject_cast<EditorView*>(tabWidget->widget(0));
+                if (firstEd && firstEd->filePath.isEmpty() && !firstEd->document()->isModified() && firstEd->toPlainText().isEmpty()) {
+                    tabWidget->removeTab(0);
+                    delete firstEd;
+                }
+            }
+
+            int index = tabWidget->addTab(editor, fileInfo.fileName());
+            tabWidget->setCurrentIndex(index);
+            ruler->setEditor(editor);
+            applyLayoutModeToEditor(editor, currentLayoutMode);
+        }
+    }
+
+    void saveToolbarSettings() {
+        QSettings settings("MicroWriterOrg", "MicroWriterApp");
+        settings.setValue("geometry", saveGeometry());
+        settings.setValue("windowState", saveState());
+
+        settings.beginWriteArray("Toolbars");
+        for (int i = 0; i < toolbars.size(); ++i) {
+            settings.setArrayIndex(i);
+            QToolBar *tb = toolbars.at(i);
+            settings.setValue("name", tb->windowTitle());
+
+            QStringList actionKeys;
+            for (QAction *act : tb->actions()) {
+                if (!act->objectName().isEmpty()) {
+                    actionKeys.append(act->objectName());
+                }
+            }
+            settings.setValue("actions", actionKeys);
+        }
+        settings.endArray();
+    }
+
+    void loadToolbarSettings() {
+        QSettings settings("MicroWriterOrg", "MicroWriterApp");
+
+        int count = settings.beginReadArray("Toolbars");
+        if (count == 0) {
+            settings.endArray();
+            createDefaultToolBar();
+            return;
+        }
+
+        for (int i = 0; i < count; ++i) {
+            settings.setArrayIndex(i);
+            QString name = settings.value("name").toString();
+            QStringList actionKeys = settings.value("actions").toStringList();
+
+            QToolBar *tb = addToolBar(name);
+            tb->setObjectName(name);
+            tb->setWindowTitle(name);
+            toolbars.append(tb);
+
+            if (i == 0) {
+                QFontComboBox *fontCombo = new QFontComboBox(this);
+                connect(fontCombo, &QFontComboBox::currentFontChanged, this, &MicroWriter::fontfamily);
+                tb->addWidget(fontCombo);
+
+                QSpinBox *sizeSpin = new QSpinBox(this);
+                sizeSpin->setRange(8, 72);
+                sizeSpin->setValue(12);
+                connect(sizeSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MicroWriter::fontSize);
+                tb->addWidget(sizeSpin);
+
+                tb->addSeparator();
+            }
+
+            for (const QString &key : actionKeys) {
+                if (actionMap.contains(key)) {
+                    tb->addAction(actionMap[key]);
+                }
+            }
+        }
+        settings.endArray();
+
+        if (settings.contains("geometry")) {
+            restoreGeometry(settings.value("geometry").toByteArray());
+        }
+        if (settings.contains("windowState")) {
+            restoreState(settings.value("windowState").toByteArray());
+        }
+    }
+
 protected:
     void closeEvent(QCloseEvent *event) override {
         for (int i = 0; i < tabWidget->count(); ++i) {
@@ -731,10 +957,55 @@ protected:
                 return;
             }
         }
+        saveToolbarSettings();
         event->accept();
     }
 
+    // Custom Context Menu on Toolbar Right Click
+    QMenu* createPopupMenu() override {
+        QMenu *menu = new QMenu(this);
+
+        for (QToolBar *tb : toolbars) {
+            QAction *toggleAct = tb->toggleViewAction();
+            toggleAct->setText(tb->windowTitle());
+            menu->addAction(toggleAct);
+
+            QAction *customAct = menu->addAction(tr("Customize %1...").arg(tb->windowTitle()));
+            connect(customAct, &QAction::triggered, this, [=](){
+                ToolbarCustomizeDialog dlg(tb, allMenuActions, this);
+                if (dlg.exec() == QDialog::Accepted || true) {
+                    saveToolbarSettings();
+                }
+            });
+
+            menu->addSeparator();
+        }
+
+        QAction *newTbAct = menu->addAction(tr("Create New Toolbar..."));
+        connect(newTbAct, &QAction::triggered, this, &MicroWriter::createNewToolbar);
+
+        return menu;
+    }
+
 private slots:
+    void createNewToolbar() {
+        bool ok;
+        QString defaultName = QString("Toolbar %1").arg(toolbars.size() + 1);
+        QString name = QInputDialog::getText(this, tr("Create New Toolbar"),
+                                             tr("Toolbar Name:"), QLineEdit::Normal,
+                                             defaultName, &ok);
+        if (ok && !name.trimmed().isEmpty()) {
+            QToolBar *tb = addToolBar(name.trimmed());
+            tb->setObjectName(name.trimmed());
+            tb->setWindowTitle(name.trimmed());
+            toolbars.append(tb);
+
+            ToolbarCustomizeDialog dlg(tb, allMenuActions, this);
+            dlg.exec();
+            saveToolbarSettings();
+        }
+    }
+
     void newFile(const QString &title = "Untitled") {
         EditorView *editor = new EditorView(this);
         connect(editor, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
@@ -758,51 +1029,16 @@ private slots:
     }
 
     void openFile() {
-        QString fileName = QFileDialog::getOpenFileName(this, "Open Document", "", "Documents (*.html *.htm *.md *.txt);;All Files (*.*)");
+        QString fileName = QFileDialog::getOpenFileName(
+            this, 
+            "Open Document", 
+            "", 
+            "Documents (*.html *.htm *.md *.txt);;All Files (*.*)",
+            nullptr,
+            QFileDialog::DontUseNativeDialog
+        );
         if (!fileName.isEmpty()) {
-            QFile file(fileName);
-            if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-                EditorView *editor = new EditorView(this);
-                
-                QByteArray rawData = file.readAll();
-                if (rawData.contains("\r\n")) editor->eolFormat = EolCrlf;
-                else if (rawData.contains('\r') && !rawData.contains('\n')) editor->eolFormat = EolCr;
-                else editor->eolFormat = EolLf;
-
-                QTextStream in(&rawData);
-                in.setEncoding(QStringConverter::encodingForName(editor->encodingName.toUtf8()).value_or(QStringConverter::Utf8));
-                QString content = in.readAll();
-
-                connect(editor, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
-                connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
-
-                connect(editor->document(), &QTextDocument::modificationChanged, this, [=](bool changed){
-                    int idx = tabWidget->indexOf(editor);
-                    if (idx != -1) {
-                        QFileInfo fi(editor->filePath);
-                        QString name = editor->filePath.isEmpty() ? "Untitled" : fi.fileName();
-                        if (changed) name += " *";
-                        tabWidget->setTabText(idx, name);
-                    }
-                });
-
-                if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
-                    editor->setHtml(content);
-                } else if (fileName.endsWith(".md")) {
-                    editor->setMarkdown(content);
-                } else {
-                    editor->setPlainText(content);
-                }
-                
-                editor->filePath = fileName;
-                editor->document()->setModified(false);
-                
-                QFileInfo fileInfo(fileName);
-                int index = tabWidget->addTab(editor, fileInfo.fileName());
-                tabWidget->setCurrentIndex(index);
-                ruler->setEditor(editor);
-                applyLayoutModeToEditor(editor, currentLayoutMode);
-            }
+            openFilePath(fileName);
         }
     }
 
@@ -821,7 +1057,10 @@ private slots:
         EditorView *editor = currentEditor();
         if (!editor) return;
 
-        QFileDialog dialog(this, "Save Document As");
+        QString defaultPath = editor->filePath.isEmpty() ? "untitled.html" : editor->filePath;
+
+        QFileDialog dialog(this, "Save Document As", defaultPath);
+        dialog.setOption(QFileDialog::DontUseNativeDialog, true);
         dialog.setAcceptMode(QFileDialog::AcceptSave);
         dialog.setNameFilters({"HTML Files (*.html)", "Markdown (*.md)", "Text Files (*.txt)", "All Files (*.*)"});
         
@@ -894,21 +1133,7 @@ private slots:
         QPrinter printer(QPrinter::HighResolution);
         QPrintDialog dialog(&printer, this);
         if (dialog.exec() == QDialog::Accepted) {
-            if (!editor->headerText().isEmpty() || !editor->footerText().isEmpty()) {
-                QPainter painter(&printer);
-                editor->document()->print(&printer);
-                QRectF pageRect = printer.pageRect(QPrinter::DevicePixel);
-                painter.setFont(QFont("Arial", 10));
-                painter.setPen(Qt::black);
-                if (!editor->headerText().isEmpty()) {
-                    painter.drawText(pageRect.left() + 50, pageRect.top() + 50, editor->headerText());
-                }
-                if (!editor->footerText().isEmpty()) {
-                    painter.drawText(pageRect.left() + 50, pageRect.bottom() - 50, editor->footerText());
-                }
-            } else {
-                editor->print(&printer);
-            }
+            editor->print(&printer);
         }
     }
 
@@ -924,33 +1149,115 @@ private slots:
         preview.exec();
     }
 
-    void exportPdf() {
+void exportPdf() {
         EditorView *editor = currentEditor();
         if (!editor) return;
-
-        QString fileName = QFileDialog::getSaveFileName(this, "Export PDF", "", "PDF Files (*.pdf)");
-        if (!fileName.isEmpty()) {
-            if (!fileName.endsWith(".pdf", Qt::CaseInsensitive)) {
-                fileName += ".pdf";
+    
+        QString defaultPath = "untitled.pdf";
+        if (!editor->filePath.isEmpty()) {
+            QFileInfo fi(editor->filePath);
+            defaultPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".pdf";
+        }
+    
+        QString fileName = QFileDialog::getSaveFileName(
+            this, 
+            "Export PDF", 
+            defaultPath, 
+            "PDF Files (*.pdf)",
+            nullptr,
+            QFileDialog::DontUseNativeDialog
+        );
+        if (fileName.isEmpty()) return;
+    
+        if (!fileName.endsWith(".pdf", Qt::CaseInsensitive)) {
+            fileName += ".pdf";
+        }
+    
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setOutputFormat(QPrinter::PdfFormat);
+        printer.setOutputFileName(fileName);
+        printer.setPageSize(QPageSize(QPageSize::Letter));
+        printer.setPageMargins(QMarginsF(15, 15, 15, 15), QPageLayout::Millimeter);
+    
+        // If no custom header or footer is set, use Qt's native document printer directly
+        if (editor->headerText().isEmpty() && editor->footerText().isEmpty()) {
+            QTextDocument *doc = editor->document()->clone();
+            
+            // Force text color to black if dark mode was active
+            QTextCursor cursor(doc);
+            cursor.select(QTextCursor::Document);
+            QTextCharFormat fmt = cursor.charFormat();
+            if (fmt.foreground().color().lightness() > 150) {
+                fmt.setForeground(Qt::black);
+                cursor.mergeCharFormat(fmt);
             }
-            QPrinter printer(QPrinter::HighResolution);
-            printer.setOutputFormat(QPrinter::PdfFormat);
-            printer.setOutputFileName(fileName);
-            if (!editor->headerText().isEmpty() || !editor->footerText().isEmpty()) {
-                QPainter painter(&printer);
-                editor->document()->print(&printer);
-                QRectF pageRect = printer.pageRect(QPrinter::DevicePixel);
-                painter.setFont(QFont("Arial", 10));
-                painter.setPen(Qt::black);
+    
+            doc->print(&printer);
+            delete doc;
+        } else {
+            // Custom multi-page rendering with Headers & Footers
+            QPainter painter;
+            if (!painter.begin(&printer)) {
+                QMessageBox::critical(this, "Export PDF Error", "Could not initialize PDF painter engine.");
+                return;
+            }
+    
+            QTextDocument *doc = editor->document()->clone();
+            
+            QRectF pageRect = printer.pageLayout().paintRectPixels(printer.resolution());
+            qreal dpiScale = printer.resolution() / 96.0; // Scale factor from 96 DPI screen units to Printer DPI
+    
+            qreal headerHeight = editor->headerText().isEmpty() ? 0 : (40.0 * dpiScale);
+            qreal footerHeight = editor->footerText().isEmpty() ? 0 : (40.0 * dpiScale);
+            qreal bodyHeight = pageRect.height() - headerHeight - footerHeight;
+    
+            // Set document page dimensions in 96 DPI logical units
+            doc->setPageSize(QSizeF(pageRect.width() / dpiScale, bodyHeight / dpiScale));
+    
+            int pageCount = doc->pageCount();
+    
+            for (int page = 0; page < pageCount; ++page) {
+                if (page > 0) {
+                    printer.newPage();
+                }
+    
+                // Draw Header
                 if (!editor->headerText().isEmpty()) {
-                    painter.drawText(pageRect.left() + 50, pageRect.top() + 50, editor->headerText());
+                    painter.setFont(QFont("Arial", 10));
+                    painter.setPen(Qt::black);
+                    painter.drawText(QRectF(0, 0, pageRect.width(), headerHeight), Qt::AlignCenter, editor->headerText());
                 }
+    
+                // Draw Footer
                 if (!editor->footerText().isEmpty()) {
-                    painter.drawText(pageRect.left() + 50, pageRect.bottom() - 50, editor->footerText());
+                    painter.setFont(QFont("Arial", 10));
+                    painter.setPen(Qt::black);
+                    painter.drawText(QRectF(0, pageRect.height() - footerHeight, pageRect.width(), footerHeight), Qt::AlignCenter, editor->footerText());
                 }
-            } else {
-                editor->print(&printer);
+    
+                // Draw Body Content with DPI Matrix Scaling
+                painter.save();
+                painter.translate(0, headerHeight);
+                painter.scale(dpiScale, dpiScale); // Transform 96 DPI layout up to printer DPI
+                painter.translate(0, - (page * (bodyHeight / dpiScale)));
+    
+                QAbstractTextDocumentLayout::PaintContext ctx;
+                ctx.clip = QRectF(0, page * (bodyHeight / dpiScale), pageRect.width() / dpiScale, bodyHeight / dpiScale);
+                ctx.palette.setColor(QPalette::Text, Qt::black); // Ensure dark mode doesn't print white text
+    
+                doc->documentLayout()->draw(&painter, ctx);
+                painter.restore();
             }
+    
+            painter.end();
+            delete doc;
+        }
+    
+        QFileInfo checkFile(fileName);
+        if (checkFile.exists() && checkFile.size() > 0) {
+            QMessageBox::information(this, "Export PDF", "PDF exported successfully:\n" + fileName);
+        } else {
+            QMessageBox::critical(this, "Export PDF Error", "Could not generate PDF file.");
         }
     }
 
@@ -958,13 +1265,36 @@ private slots:
         EditorView *editor = currentEditor();
         if (!editor) return;
 
-        QString fileName = QFileDialog::getSaveFileName(this, "Export as ODT", "", "OpenDocument Text (*.odt)");
-        if (!fileName.isEmpty()) {
-            if (!fileName.endsWith(".odt", Qt::CaseInsensitive)) {
-                fileName += ".odt";
-            }
-            QTextDocumentWriter writer(fileName, "odf");
-            writer.write(editor->document());
+        QString defaultPath = "untitled.odt";
+        if (!editor->filePath.isEmpty()) {
+            QFileInfo fi(editor->filePath);
+            defaultPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".odt";
+        }
+
+        QString fileName = QFileDialog::getSaveFileName(
+            this, 
+            "Export as ODT", 
+            defaultPath, 
+            "OpenDocument Text (*.odt)",
+            nullptr,
+            QFileDialog::DontUseNativeDialog
+        );
+        if (fileName.isEmpty()) return;
+
+        if (!fileName.endsWith(".odt", Qt::CaseInsensitive)) {
+            fileName += ".odt";
+        }
+
+        QTextDocument *docCopy = editor->document()->clone();
+        QTextDocumentWriter writer(fileName, "ODF");
+        bool success = writer.write(docCopy);
+        delete docCopy;
+
+        QFileInfo checkFile(fileName);
+        if (success && checkFile.exists() && checkFile.size() > 0) {
+            QMessageBox::information(this, "Export ODT", "ODT file exported successfully:\n" + fileName);
+        } else {
+            QMessageBox::critical(this, "Export ODT Error", "Failed to write ODT document format.");
         }
     }
 
@@ -972,7 +1302,14 @@ private slots:
         EditorView *editor = currentEditor();
         if (!editor) return;
 
-        QString fileName = QFileDialog::getOpenFileName(this, "Insert Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)");
+        QString fileName = QFileDialog::getOpenFileName(
+            this, 
+            "Insert Image", 
+            "", 
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+            nullptr,
+            QFileDialog::DontUseNativeDialog
+        );
         if (!fileName.isEmpty()) {
             QImage image(fileName);
             if (!image.isNull()) {
@@ -1513,7 +1850,6 @@ private:
                 content = editor->toMarkdown();
             } else if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
                 content = editor->toHtml();
-                // Modern HTML5 DOCTYPE fix
                 content.replace(
                     QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption),
                     "<!DOCTYPE html>"
@@ -1549,6 +1885,17 @@ private:
         editor->mergeCurrentCharFormat(format);
     }
 
+    void registerAction(QAction *act) {
+        if (act && !act->text().isEmpty()) {
+            allMenuActions.append(act);
+            QString key = act->text();
+            key.remove('&');
+            key = key.trimmed();
+            act->setObjectName(key);
+            actionMap[key] = act;
+        }
+    }
+
     void createMenus() {
         QMenu *fileMenu = menuBar()->addMenu(tr("&File"));
 
@@ -1556,21 +1903,25 @@ private:
         newAction->setShortcut(QKeySequence::New);
         connect(newAction, &QAction::triggered, this, [=](){ newFile(); });
         fileMenu->addAction(newAction);
+        registerAction(newAction);
 
         QAction *openAction = new QAction(tr("&Open..."), this);
         openAction->setShortcut(QKeySequence::Open);
         connect(openAction, &QAction::triggered, this, &MicroWriter::openFile);
         fileMenu->addAction(openAction);
+        registerAction(openAction);
 
         QAction *saveAction = new QAction(tr("&Save"), this);
         saveAction->setShortcut(QKeySequence::Save);
         connect(saveAction, &QAction::triggered, this, &MicroWriter::saveFile);
         fileMenu->addAction(saveAction);
+        registerAction(saveAction);
 
         QAction *saveAsAct = new QAction(tr("Save &As..."), this);
         saveAsAct->setShortcut(QKeySequence::SaveAs);
         connect(saveAsAct, &QAction::triggered, this, &MicroWriter::saveAsFile);
         fileMenu->addAction(saveAsAct);
+        registerAction(saveAsAct);
 
         fileMenu->addSeparator();
 
@@ -1628,19 +1979,23 @@ private:
         QAction *printPreviewAct = new QAction(tr("Print Pre&view..."), this);
         connect(printPreviewAct, &QAction::triggered, this, &MicroWriter::printPreview);
         fileMenu->addAction(printPreviewAct);
+        registerAction(printPreviewAct);
 
         QAction *printAct = new QAction(tr("&Print..."), this);
         printAct->setShortcut(QKeySequence::Print);
         connect(printAct, &QAction::triggered, this, &MicroWriter::printDocument);
         fileMenu->addAction(printAct);
+        registerAction(printAct);
 
         QAction *pdfAct = new QAction(tr("Export as &PDF..."), this);
         connect(pdfAct, &QAction::triggered, this, &MicroWriter::exportPdf);
         fileMenu->addAction(pdfAct);
+        registerAction(pdfAct);
 
         QAction *odtAct = new QAction(tr("Export as &ODT..."), this);
         connect(odtAct, &QAction::triggered, this, &MicroWriter::exportOdt);
         fileMenu->addAction(odtAct);
+        registerAction(odtAct);
 
         fileMenu->addSeparator();
 
@@ -1654,11 +2009,13 @@ private:
         undoAct->setShortcut(QKeySequence::Undo);
         connect(undoAct, &QAction::triggered, this, [=](){ if (currentEditor()) currentEditor()->undo(); });
         editMenu->addAction(undoAct);
+        registerAction(undoAct);
 
         QAction *redoAct = new QAction(tr("&Redo"), this);
         redoAct->setShortcut(QKeySequence::Redo);
         connect(redoAct, &QAction::triggered, this, [=](){ if (currentEditor()) currentEditor()->redo(); });
         editMenu->addAction(redoAct);
+        registerAction(redoAct);
 
         editMenu->addSeparator();
 
@@ -1666,6 +2023,7 @@ private:
         findAct->setShortcut(QKeySequence::Find);
         connect(findAct, &QAction::triggered, this, &MicroWriter::showFindDialog);
         editMenu->addAction(findAct);
+        registerAction(findAct);
 
         QMenu *formatMenu = menuBar()->addMenu(tr("&Format"));
 
@@ -1673,56 +2031,68 @@ private:
         boldAct->setShortcut(QKeySequence::Bold);
         connect(boldAct, &QAction::triggered, this, &MicroWriter::textBold);
         formatMenu->addAction(boldAct);
+        registerAction(boldAct);
 
         QAction *italicAct = new QAction(tr("&Italic"), this);
         italicAct->setShortcut(QKeySequence::Italic);
         connect(italicAct, &QAction::triggered, this, &MicroWriter::textItalic);
         formatMenu->addAction(italicAct);
+        registerAction(italicAct);
 
         QAction *underlineAct = new QAction(tr("&Underline"), this);
         underlineAct->setShortcut(QKeySequence::Underline);
         connect(underlineAct, &QAction::triggered, this, &MicroWriter::textUnderline);
         formatMenu->addAction(underlineAct);
+        registerAction(underlineAct);
 
         QAction *strikeAct = new QAction(tr("Strikethrough"), this);
         connect(strikeAct, &QAction::triggered, this, &MicroWriter::textStrikethrough);
         formatMenu->addAction(strikeAct);
+        registerAction(strikeAct);
 
         QAction *superAct = new QAction(tr("Superscript"), this);
         connect(superAct, &QAction::triggered, this, &MicroWriter::textSuperscript);
         formatMenu->addAction(superAct);
+        registerAction(superAct);
 
         QAction *subAct = new QAction(tr("Subscript"), this);
         connect(subAct, &QAction::triggered, this, &MicroWriter::textSubscript);
         formatMenu->addAction(subAct);
+        registerAction(subAct);
 
         formatMenu->addSeparator();
 
         QAction *colorAct = new QAction(tr("Text &Color..."), this);
         connect(colorAct, &QAction::triggered, this, &MicroWriter::textTextColor);
         formatMenu->addAction(colorAct);
+        registerAction(colorAct);
 
         QAction *shadingAct = new QAction(tr("Text &Shading..."), this);
         connect(shadingAct, &QAction::triggered, this, &MicroWriter::textShading);
         formatMenu->addAction(shadingAct);
+        registerAction(shadingAct);
 
         formatMenu->addSeparator();
 
         QAction *leftAct = new QAction(tr("Align &Left"), this);
         connect(leftAct, &QAction::triggered, this, &MicroWriter::alignLeft);
         formatMenu->addAction(leftAct);
+        registerAction(leftAct);
 
         QAction *centerAct = new QAction(tr("Align &Center"), this);
         connect(centerAct, &QAction::triggered, this, &MicroWriter::alignCenter);
         formatMenu->addAction(centerAct);
+        registerAction(centerAct);
 
         QAction *rightAct = new QAction(tr("Align &Right"), this);
         connect(rightAct, &QAction::triggered, this, &MicroWriter::alignRight);
         formatMenu->addAction(rightAct);
+        registerAction(rightAct);
 
         QAction *justifyAct = new QAction(tr("&Justify"), this);
         connect(justifyAct, &QAction::triggered, this, &MicroWriter::alignJustify);
         formatMenu->addAction(justifyAct);
+        registerAction(justifyAct);
 
         formatMenu->addSeparator();
 
@@ -1730,62 +2100,76 @@ private:
         doubleSpaceAct->setCheckable(true);
         connect(doubleSpaceAct, &QAction::triggered, this, &MicroWriter::toggleDoubleSpacing);
         formatMenu->addAction(doubleSpaceAct);
+        registerAction(doubleSpaceAct);
 
         QAction *indentAct = new QAction(tr("Indent"), this);
         connect(indentAct, &QAction::triggered, this, &MicroWriter::formatIndent);
         formatMenu->addAction(indentAct);
+        registerAction(indentAct);
 
         QAction *unindentAct = new QAction(tr("Unindent"), this);
         connect(unindentAct, &QAction::triggered, this, &MicroWriter::formatUnindent);
         formatMenu->addAction(unindentAct);
+        registerAction(unindentAct);
 
         QAction *stripBlankAct = new QAction(tr("Strip Blank Lines"), this);
         connect(stripBlankAct, &QAction::triggered, this, &MicroWriter::formatStripBlankLines);
         formatMenu->addAction(stripBlankAct);
+        registerAction(stripBlankAct);
 
         formatMenu->addSeparator();
 
         QAction *bulletAct = new QAction(tr("Bullet &List"), this);
         connect(bulletAct, &QAction::triggered, this, &MicroWriter::insertBulletList);
         formatMenu->addAction(bulletAct);
+        registerAction(bulletAct);
 
         QAction *numberedAct = new QAction(tr("&Numbered List"), this);
         connect(numberedAct, &QAction::triggered, this, &MicroWriter::insertNumberedList);
         formatMenu->addAction(numberedAct);
+        registerAction(numberedAct);
 
         QAction *blockquoteAct = new QAction(tr("Blockquote"), this);
         connect(blockquoteAct, &QAction::triggered, this, &MicroWriter::insertBlockquote);
         formatMenu->addAction(blockquoteAct);
+        registerAction(blockquoteAct);
 
         QAction *hrAct = new QAction(tr("Horizontal &Line"), this);
         connect(hrAct, &QAction::triggered, this, &MicroWriter::insertHorizontalLine);
         formatMenu->addAction(hrAct);
+        registerAction(hrAct);
 
         QAction *tableAct = new QAction(tr("Insert &Table..."), this);
         connect(tableAct, &QAction::triggered, this, &MicroWriter::insertTable);
         formatMenu->addAction(tableAct);
+        registerAction(tableAct);
 
         QAction *dateTimeAct = new QAction(tr("Insert &Date & Time..."), this);
         connect(dateTimeAct, &QAction::triggered, this, &MicroWriter::insertDateTime);
         formatMenu->addAction(dateTimeAct);
+        registerAction(dateTimeAct);
 
         QAction *linkAct = new QAction(tr("Insert &Link..."), this);
         connect(linkAct, &QAction::triggered, this, &MicroWriter::insertLink);
         formatMenu->addAction(linkAct);
+        registerAction(linkAct);
 
         QAction *symbolAct = new QAction(tr("Insert &Symbol..."), this);
         connect(symbolAct, &QAction::triggered, this, &MicroWriter::insertSymbol);
         formatMenu->addAction(symbolAct);
+        registerAction(symbolAct);
 
         formatMenu->addSeparator();
 
         QAction *imgAct = new QAction(tr("Insert &Image..."), this);
         connect(imgAct, &QAction::triggered, this, &MicroWriter::insertImage);
         formatMenu->addAction(imgAct);
+        registerAction(imgAct);
 
         QAction *headerFooterAct = new QAction(tr("Header & Footer..."), this);
         connect(headerFooterAct, &QAction::triggered, this, &MicroWriter::configureHeaderFooter);
         formatMenu->addAction(headerFooterAct);
+        registerAction(headerFooterAct);
 
         // Tools Menu
         QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
@@ -1793,10 +2177,12 @@ private:
         QAction *sortLinesAct = new QAction(tr("Sort Lines (Ignore Case)"), this);
         connect(sortLinesAct, &QAction::triggered, this, &MicroWriter::toolsSortLines);
         toolsMenu->addAction(sortLinesAct);
+        registerAction(sortLinesAct);
 
         QAction *reverseLinesAct = new QAction(tr("Reverse Lines"), this);
         connect(reverseLinesAct, &QAction::triggered, this, &MicroWriter::toolsReverseLines);
         toolsMenu->addAction(reverseLinesAct);
+        registerAction(reverseLinesAct);
 
         toolsMenu->addSeparator();
 
@@ -1804,45 +2190,48 @@ private:
         QAction *upperAct = new QAction(tr("UPPERCASE"), this);
         connect(upperAct, &QAction::triggered, this, &MicroWriter::toolsUppercase);
         caseMenu->addAction(upperAct);
+        registerAction(upperAct);
 
         QAction *lowerAct = new QAction(tr("lowercase"), this);
         connect(lowerAct, &QAction::triggered, this, &MicroWriter::toolsLowercase);
         caseMenu->addAction(lowerAct);
+        registerAction(lowerAct);
 
         QAction *titleAct = new QAction(tr("Title Case"), this);
         connect(titleAct, &QAction::triggered, this, &MicroWriter::toolsTitleCase);
         caseMenu->addAction(titleAct);
+        registerAction(titleAct);
 
         toolsMenu->addSeparator();
 
         QAction *prefixAct = new QAction(tr("Add Prefix..."), this);
         connect(prefixAct, &QAction::triggered, this, &MicroWriter::toolsAddPrefix);
         toolsMenu->addAction(prefixAct);
+        registerAction(prefixAct);
 
         QAction *suffixAct = new QAction(tr("Add Suffix..."), this);
         connect(suffixAct, &QAction::triggered, this, &MicroWriter::toolsAddSuffix);
         toolsMenu->addAction(suffixAct);
+        registerAction(suffixAct);
 
         toolsMenu->addSeparator();
 
         QAction *tabsToSpacesAct = new QAction(tr("Convert Tabs to Spaces"), this);
         connect(tabsToSpacesAct, &QAction::triggered, this, &MicroWriter::toolsTabsToSpaces);
         toolsMenu->addAction(tabsToSpacesAct);
+        registerAction(tabsToSpacesAct);
 
         QAction *spacesToTabsAct = new QAction(tr("Convert Spaces to Tabs"), this);
         connect(spacesToTabsAct, &QAction::triggered, this, &MicroWriter::toolsSpacesToTabs);
         toolsMenu->addAction(spacesToTabsAct);
+        registerAction(spacesToTabsAct);
 
         // View Menu
         QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
 
-        QAction *toggleToolBarAct = new QAction(tr("Show Formatting Toolbar"), this);
-        toggleToolBarAct->setCheckable(true);
-        toggleToolBarAct->setChecked(true);
-        connect(toggleToolBarAct, &QAction::triggered, this, [=](bool checked){
-            if (formattingToolBar) formattingToolBar->setVisible(checked);
-        });
-        viewMenu->addAction(toggleToolBarAct);
+        QAction *newTbAct = new QAction(tr("Create New Toolbar..."), this);
+        connect(newTbAct, &QAction::triggered, this, &MicroWriter::createNewToolbar);
+        viewMenu->addAction(newTbAct);
 
         viewMenu->addSeparator();
 
@@ -1887,57 +2276,30 @@ private:
         helpMenu->addAction(regexHelpAct);
     }
 
-    void createToolBar() {
-        formattingToolBar = addToolBar(tr("Formatting"));
+    void createDefaultToolBar() {
+        QToolBar *tb1 = addToolBar(tr("Toolbar 1"));
+        tb1->setObjectName("Toolbar 1");
+        tb1->setWindowTitle("Toolbar 1");
+        toolbars.append(tb1);
 
         QFontComboBox *fontCombo = new QFontComboBox(this);
         connect(fontCombo, &QFontComboBox::currentFontChanged, this, &MicroWriter::fontfamily);
-        formattingToolBar->addWidget(fontCombo);
+        tb1->addWidget(fontCombo);
 
         QSpinBox *sizeSpin = new QSpinBox(this);
         sizeSpin->setRange(8, 72);
         sizeSpin->setValue(12);
         connect(sizeSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MicroWriter::fontSize);
-        formattingToolBar->addWidget(sizeSpin);
+        tb1->addWidget(sizeSpin);
 
-        formattingToolBar->addSeparator();
+        tb1->addSeparator();
 
-        QAction *boldAct = new QAction(tr("&Bold"), this);
-        boldAct->setShortcut(QKeySequence::Bold);
-        connect(boldAct, &QAction::triggered, this, &MicroWriter::textBold);
-        formattingToolBar->addAction(boldAct);
-
-        QAction *italicAct = new QAction(tr("&Italic"), this);
-        italicAct->setShortcut(QKeySequence::Italic);
-        connect(italicAct, &QAction::triggered, this, &MicroWriter::textItalic);
-        formattingToolBar->addAction(italicAct);
-
-        QAction *underlineAct = new QAction(tr("&Underline"), this);
-        underlineAct->setShortcut(QKeySequence::Underline);
-        connect(underlineAct, &QAction::triggered, this, &MicroWriter::textUnderline);
-        formattingToolBar->addAction(underlineAct);
-
-        QAction *colorAct = new QAction(tr("&Color"), this);
-        connect(colorAct, &QAction::triggered, this, &MicroWriter::textTextColor);
-        formattingToolBar->addAction(colorAct);
-
-        formattingToolBar->addSeparator();
-
-        QAction *leftAct = new QAction(tr("Left"), this);
-        connect(leftAct, &QAction::triggered, this, &MicroWriter::alignLeft);
-        formattingToolBar->addAction(leftAct);
-
-        QAction *centerAct = new QAction(tr("Center"), this);
-        connect(centerAct, &QAction::triggered, this, &MicroWriter::alignCenter);
-        formattingToolBar->addAction(centerAct);
-
-        QAction *rightAct = new QAction(tr("Right"), this);
-        connect(rightAct, &QAction::triggered, this, &MicroWriter::alignRight);
-        formattingToolBar->addAction(rightAct);
-
-        QAction *justifyAct = new QAction(tr("Justify"), this);
-        connect(justifyAct, &QAction::triggered, this, &MicroWriter::alignJustify);
-        formattingToolBar->addAction(justifyAct);
+        for (QAction *act : allMenuActions) {
+            if (act->text().contains("Bold") || act->text().contains("Italic") || act->text().contains("Underline") ||
+                act->text().contains("Left") || act->text().contains("Center") || act->text().contains("Right") || act->text().contains("Justify")) {
+                tb1->addAction(act);
+            }
+        }
     }
 
     void createStatusBar() {
@@ -1947,17 +2309,25 @@ private:
 
     Ruler *ruler;
     QTabWidget *tabWidget;
-    QToolBar *formattingToolBar;
     QLabel *statusLabel;
     LayoutMode currentLayoutMode;
     bool darkModeActive;
     QAction *darkAct;
+    QList<QAction*> allMenuActions;
+    QMap<QString, QAction*> actionMap;
+    QList<QToolBar*> toolbars;
 };
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
     
     MicroWriter window;
+
+    QStringList args = QCoreApplication::arguments();
+    for (int i = 1; i < args.size(); ++i) {
+        window.openFilePath(args.at(i));
+    }
+
     window.show();
     
     return app.exec();
