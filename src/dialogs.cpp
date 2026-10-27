@@ -1,5 +1,7 @@
 #include "dialogs.h"
 #include "editorview.h"
+#include "codeeditorview.h"
+#include "baseeditor.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -76,18 +78,21 @@ QString DateTimeDialog::selectedFormatString() const {
 // LinkDialog
 LinkDialog::LinkDialog(const QString &defaultText, QWidget *parent) : QDialog(parent) {
     setWindowTitle("Insert Link");
-    resize(320, 160);
+    resize(320, 140);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("URL (e.g., https://example.com):", this));
-    urlInput = new QLineEdit(this);
-    urlInput->setPlaceholderText("https://");
-    layout->addWidget(urlInput);
 
-    layout->addWidget(new QLabel("Display Text:", this));
-    textInput = new QLineEdit(this);
-    textInput->setText(defaultText);
-    layout->addWidget(textInput);
+    QHBoxLayout *textLayout = new QHBoxLayout();
+    textLayout->addWidget(new QLabel("Display Text:", this));
+    textInput = new QLineEdit(defaultText, this);
+    textLayout->addWidget(textInput);
+    layout->addLayout(textLayout);
+
+    QHBoxLayout *urlLayout = new QHBoxLayout();
+    urlLayout->addWidget(new QLabel("URL:", this));
+    urlInput = new QLineEdit("https://", this);
+    urlLayout->addWidget(urlInput);
+    layout->addLayout(urlLayout);
 
     QPushButton *okBtn = new QPushButton("Insert Link", this);
     connect(okBtn, &QPushButton::clicked, this, &QDialog::accept);
@@ -98,55 +103,63 @@ QString LinkDialog::url() const { return urlInput->text(); }
 QString LinkDialog::linkText() const { return textInput->text(); }
 
 // SymbolDialog
-SymbolDialog::SymbolDialog(QWidget *parent) : QDialog(parent) {
+SymbolDialog::SymbolDialog(QWidget *parent) : QDialog(parent), selectedSymbol("") {
     setWindowTitle("Insert Symbol");
-    resize(320, 220);
+    resize(320, 240);
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Click a symbol to insert:", this));
-
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
     QGridLayout *grid = new QGridLayout();
+
     QStringList symbols = {
-        "©", "®", "™", "°", "§", "¶",
-        "±", "×", "÷", "∞", "µ", "¢",
-        "£", "¥", "€", "¬", "•", "—",
-        "–", "≈", "≠", "≤", "≥", "✔"
+        "©", "®", "™", "§", "¶", "†", "‡", "•", "–", "—",
+        "€", "£", "¥", "¢", "±", "×", "÷", "≠", "≈", "≤",
+        "≥", "∞", "°", "µ", "π", "Ω", "α", "β", "√", "∆"
     };
 
-    int row = 0, col = 0;
+    int row = 0;
+    int col = 0;
     for (const QString &sym : symbols) {
         QPushButton *btn = new QPushButton(sym, this);
-        btn->setFixedSize(40, 40);
-        connect(btn, &QPushButton::clicked, this, [=]() {
+        btn->setFixedSize(36, 36);
+        connect(btn, &QPushButton::clicked, this, [this, sym](){
             selectedSymbol = sym;
             accept();
         });
         grid->addWidget(btn, row, col);
         col++;
-        if (col > 5) { col = 0; row++; }
+        if (col >= 6) {
+            col = 0;
+            row++;
+        }
     }
-    layout->addLayout(grid);
+
+    mainLayout->addLayout(grid);
 }
 
 QString SymbolDialog::getSelectedSymbol() const { return selectedSymbol; }
 
 // HeaderFooterDialog
-HeaderFooterDialog::HeaderFooterDialog(const QString &header, const QString &footer, QWidget *parent) : QDialog(parent) {
-    setWindowTitle("Header & Footer Settings");
-    resize(350, 180);
+HeaderFooterDialog::HeaderFooterDialog(const QString &header, const QString &footer, QWidget *parent)
+    : QDialog(parent)
+{
+    setWindowTitle("Page Header & Footer");
+    resize(350, 160);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Document Header Text:", this));
-    headerInput = new QLineEdit(this);
-    headerInput->setText(header);
-    layout->addWidget(headerInput);
 
-    layout->addWidget(new QLabel("Document Footer Text:", this));
-    footerInput = new QLineEdit(this);
-    footerInput->setText(footer);
-    layout->addWidget(footerInput);
+    QHBoxLayout *hLayout = new QHBoxLayout();
+    hLayout->addWidget(new QLabel("Header Text:", this));
+    headerInput = new QLineEdit(header, this);
+    hLayout->addWidget(headerInput);
+    layout->addLayout(hLayout);
 
-    QPushButton *okBtn = new QPushButton("Save", this);
+    QHBoxLayout *fLayout = new QHBoxLayout();
+    fLayout->addWidget(new QLabel("Footer Text:", this));
+    footerInput = new QLineEdit(footer, this);
+    fLayout->addWidget(footerInput);
+    layout->addLayout(fLayout);
+
+    QPushButton *okBtn = new QPushButton("Apply", this);
     connect(okBtn, &QPushButton::clicked, this, &QDialog::accept);
     layout->addWidget(okBtn);
 }
@@ -155,21 +168,26 @@ QString HeaderFooterDialog::getHeader() const { return headerInput->text(); }
 QString HeaderFooterDialog::getFooter() const { return footerInput->text(); }
 
 // FindReplaceDialog
-FindReplaceDialog::FindReplaceDialog(QTextEdit *ed, QWidget *parent) : QDialog(parent), editor(ed) {
-    setWindowTitle("Find & Replace");
+FindReplaceDialog::FindReplaceDialog(BaseEditor *ed, QWidget *parent) : QDialog(parent), editor(ed) {
+    setWindowTitle("Find and Replace");
     resize(380, 180);
 
-    QVBoxLayout *layout = new QVBoxLayout(this);
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+
+    QHBoxLayout *findLayout = new QHBoxLayout();
+    findLayout->addWidget(new QLabel("Find:", this));
     findInput = new QLineEdit(this);
-    findInput->setPlaceholderText("Find what (or regex pattern)...");
-    layout->addWidget(findInput);
+    findLayout->addWidget(findInput);
+    mainLayout->addLayout(findLayout);
 
+    QHBoxLayout *replaceLayout = new QHBoxLayout();
+    replaceLayout->addWidget(new QLabel("Replace:", this));
     replaceInput = new QLineEdit(this);
-    replaceInput->setPlaceholderText("Replace with...");
-    layout->addWidget(replaceInput);
+    replaceLayout->addWidget(replaceInput);
+    mainLayout->addLayout(replaceLayout);
 
-    regexCheckBox = new QCheckBox("Use Regular Expression (Regex)", this);
-    layout->addWidget(regexCheckBox);
+    regexCheckBox = new QCheckBox("Use Regular Expressions", this);
+    mainLayout->addWidget(regexCheckBox);
 
     QHBoxLayout *btnLayout = new QHBoxLayout();
     QPushButton *findBtn = new QPushButton("Find Next", this);
@@ -179,7 +197,7 @@ FindReplaceDialog::FindReplaceDialog(QTextEdit *ed, QWidget *parent) : QDialog(p
     btnLayout->addWidget(findBtn);
     btnLayout->addWidget(replaceBtn);
     btnLayout->addWidget(replaceAllBtn);
-    layout->addLayout(btnLayout);
+    mainLayout->addLayout(btnLayout);
 
     connect(findBtn, &QPushButton::clicked, this, &FindReplaceDialog::findNext);
     connect(replaceBtn, &QPushButton::clicked, this, &FindReplaceDialog::replaceCurrent);
@@ -189,7 +207,7 @@ FindReplaceDialog::FindReplaceDialog(QTextEdit *ed, QWidget *parent) : QDialog(p
 void FindReplaceDialog::setPattern(const QString &findText, const QString &replaceText, bool useRegex) {
     findInput->setText(findText);
     replaceInput->setText(replaceText);
-    if (regexCheckBox) regexCheckBox->setChecked(useRegex);
+    regexCheckBox->setChecked(useRegex);
 }
 
 void FindReplaceDialog::findNext() {
@@ -199,21 +217,14 @@ void FindReplaceDialog::findNext() {
     if (regexCheckBox->isChecked()) {
         QRegularExpression re(query);
         if (!re.isValid()) return;
-        QTextDocument::FindFlags flags;
-        bool found = editor->find(re, flags);
-        if (!found) {
-            QTextCursor cursor = editor->textCursor();
-            cursor.movePosition(QTextCursor::Start);
-            editor->setTextCursor(cursor);
-            editor->find(re, flags);
+        if (!editor->findRegExp(re)) {
+            editor->moveCursor(QTextCursor::Start);
+            editor->findRegExp(re);
         }
     } else {
-        bool found = editor->find(query);
-        if (!found) {
-            QTextCursor cursor = editor->textCursor();
-            cursor.movePosition(QTextCursor::Start);
-            editor->setTextCursor(cursor);
-            editor->find(query);
+        if (!editor->findText(query)) {
+            editor->moveCursor(QTextCursor::Start);
+            editor->findText(query);
         }
     }
 }
@@ -223,14 +234,11 @@ void FindReplaceDialog::replaceCurrent() {
     QTextCursor cursor = editor->textCursor();
     if (cursor.hasSelection()) {
         if (regexCheckBox->isChecked()) {
-            QString query = findInput->text();
-            QRegularExpression re(query);
-            if (re.isValid()) {
-                QString selected = cursor.selectedText();
-                QString replaced = selected.replace(re, replaceInput->text());
-                cursor.insertText(replaced);
-            }
-        } else if (cursor.selectedText() == findInput->text()) {
+            QRegularExpression re(findInput->text());
+            QString selected = cursor.selectedText();
+            selected.replace(re, replaceInput->text());
+            cursor.insertText(selected);
+        } else {
             cursor.insertText(replaceInput->text());
         }
     }
@@ -247,22 +255,47 @@ void FindReplaceDialog::replaceAll() {
     cursor.movePosition(QTextCursor::Start);
     editor->setTextCursor(cursor);
 
+    int count = 0;
+    const int maxReplacements = 100000;
+
     if (regexCheckBox->isChecked()) {
         QRegularExpression re(query);
         if (!re.isValid()) {
             cursor.endEditBlock();
             return;
         }
-        while (editor->find(re)) {
+
+        while (editor->findRegExp(re)) {
             QTextCursor c = editor->textCursor();
             QString selected = c.selectedText();
-            QString replaced = selected.replace(re, replacement);
+
+            if (selected.isEmpty()) {
+                if (!c.movePosition(QTextCursor::NextCharacter)) {
+                    break;
+                }
+                editor->setTextCursor(c);
+                continue;
+            }
+
+            QString replaced = selected;
+            replaced.replace(re, replacement);
             c.insertText(replaced);
+
+            if (++count >= maxReplacements) break;
         }
     } else {
-        while (editor->find(query)) {
+        while (editor->findText(query)) {
             QTextCursor c = editor->textCursor();
+            if (c.selectedText().isEmpty()) {
+                if (!c.movePosition(QTextCursor::NextCharacter)) {
+                    break;
+                }
+                editor->setTextCursor(c);
+                continue;
+            }
             c.insertText(replacement);
+
+            if (++count >= maxReplacements) break;
         }
     }
     cursor.endEditBlock();
@@ -288,10 +321,14 @@ RegexHelpDialog::RegexHelpDialog(EditorView *ed, QWidget *parent) : QDialog(pare
     struct PatternInfo { QString desc; QString find; QString rep; };
     QList<PatternInfo> examples = {
         {"Cut everything after character (e.g. 'r' in Skater)", "(r).*", "\\1"},
-        {"Cut everything before character (e.g. up to 'Skater')", ".*(Skater)", "\\1"},
-        {"Remove file extension (e.g. .z64, .txt)", "\\.[^.]+$", ""},
-        {"Find all numbers", "\\d+", ""},
-        {"Remove trailing whitespace", "\\s+$", ""}
+        {"Cut everything before character (e.g. up to 'Ska')", ".*(Ska)", "\\1"},
+        {"Keep characters inside quotes", "\"([^\"]*)\"", "\\1"},
+        {"Remove all digits / numbers", "\\d+", ""},
+        {"Remove leading whitespace per line", "^[ \\t]+", ""},
+        {"Remove trailing whitespace per line", "[ \\t]+$", ""},
+        {"Replace multiple spaces with single space", "[ \\t]+", " "},
+        {"Extract email addresses", "([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+)", "\\1"},
+        {"Convert Markdown headers (# ) to upper", "^#+\\s*(.*)$", "\\1"}
     };
 
     tableWidget->setRowCount(examples.size());
@@ -304,80 +341,144 @@ RegexHelpDialog::RegexHelpDialog(EditorView *ed, QWidget *parent) : QDialog(pare
 
     QPushButton *useBtn = new QPushButton("Use Selected Pattern", this);
     connect(useBtn, &QPushButton::clicked, this, &RegexHelpDialog::applySelected);
-    connect(tableWidget, &QTableWidget::doubleClicked, this, &RegexHelpDialog::applySelected);
+    connect(tableWidget, &QTableWidget::cellDoubleClicked, this, [this](int, int){ applySelected(); });
     layout->addWidget(useBtn);
 }
 
 void RegexHelpDialog::applySelected() {
     int row = tableWidget->currentRow();
     if (row < 0) return;
-    QString findStr = tableWidget->item(row, 1)->text();
-    QString repStr = tableWidget->item(row, 2)->text();
+
+    QString f = tableWidget->item(row, 1)->text();
+    QString r = tableWidget->item(row, 2)->text();
 
     accept();
 
-    FindReplaceDialog *dlg = new FindReplaceDialog(editor, parentWidget());
-    dlg->setAttribute(Qt::WA_DeleteOnClose);
-    dlg->setPattern(findStr, repStr, true);
-    dlg->show();
+    if (editor) {
+        FindReplaceDialog *dlg = new FindReplaceDialog(editor, parentWidget());
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        dlg->setPattern(f, r, true);
+        dlg->show();
+    }
+}
+
+// HtmlHelpDialog
+HtmlHelpDialog::HtmlHelpDialog(BaseEditor *ed, QWidget *parent) : QDialog(parent), editor(ed) {
+    setWindowTitle("HTML Quick Reference");
+    resize(500, 360);
+
+    QVBoxLayout *layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel("Double-click a tag to insert it into the current document:", this));
+
+    tableWidget = new QTableWidget(this);
+    tableWidget->setColumnCount(2);
+    tableWidget->setHorizontalHeaderLabels({"Description", "HTML Tag"});
+    tableWidget->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    tableWidget->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    struct HtmlSnippet { QString desc; QString tag; };
+    QList<HtmlSnippet> snippets = {
+        {"Paragraph", "<p></p>"},
+        {"Heading 1", "<h1></h1>"},
+        {"Heading 2", "<h2></h2>"},
+        {"Bold text", "<b></b>"},
+        {"Italic text", "<i></i>"},
+        {"Anchor / Link", "<a href=\"\"></a>"},
+        {"Image element", "<img src=\"\" alt=\"\" />"},
+        {"Unordered List", "<ul>\n  <li></li>\n</ul>"},
+        {"Ordered List", "<ol>\n  <li></li>\n</ol>"},
+        {"Blockquote", "<blockquote></blockquote>"},
+        {"Inline Code", "<code></code>"},
+        {"Code Block", "<pre><code></code></pre>"},
+        {"Horizontal Rule", "<hr />"}
+    };
+
+    tableWidget->setRowCount(snippets.size());
+    for (int i = 0; i < snippets.size(); ++i) {
+        tableWidget->setItem(i, 0, new QTableWidgetItem(snippets[i].desc));
+        tableWidget->setItem(i, 1, new QTableWidgetItem(snippets[i].tag));
+    }
+    layout->addWidget(tableWidget);
+
+    QPushButton *insBtn = new QPushButton("Insert Tag", this);
+    connect(insBtn, &QPushButton::clicked, this, &HtmlHelpDialog::applySelected);
+    connect(tableWidget, &QTableWidget::cellDoubleClicked, this, [this](int, int){ applySelected(); });
+    layout->addWidget(insBtn);
+}
+
+void HtmlHelpDialog::applySelected() {
+    int row = tableWidget->currentRow();
+    if (row < 0 || !editor) return;
+
+    QString tag = tableWidget->item(row, 1)->text();
+    QTextCursor c = editor->textCursor();
+    c.insertText(tag);
+    editor->setTextCursor(c);
+    accept();
 }
 
 // ToolbarCustomizeDialog
 ToolbarCustomizeDialog::ToolbarCustomizeDialog(QToolBar *targetToolbar, const QList<QAction*> &allActions, QWidget *parent)
     : QDialog(parent), toolbar(targetToolbar), availableActions(allActions)
 {
-    setWindowTitle(QString("Customize Toolbar - %1").arg(targetToolbar->windowTitle()));
+    setWindowTitle("Customize Toolbar");
     resize(500, 350);
 
-    QHBoxLayout *mainLayout = new QHBoxLayout(this);
+    QVBoxLayout *mainLayout = new QVBoxLayout(this);
+    QHBoxLayout *listLayout = new QHBoxLayout();
 
-    QVBoxLayout *availLayout = new QVBoxLayout();
-    availLayout->addWidget(new QLabel("Available Actions:", this));
+    QVBoxLayout *leftLayout = new QVBoxLayout();
+    leftLayout->addWidget(new QLabel("Available Actions:", this));
     availableList = new QListWidget(this);
-    availLayout->addWidget(availableList);
+    leftLayout->addWidget(availableList);
 
-    QVBoxLayout *activeLayout = new QVBoxLayout();
-    activeLayout->addWidget(new QLabel("Active Actions in Toolbar:", this));
+    QVBoxLayout *midLayout = new QVBoxLayout();
+    QPushButton *addBtn = new QPushButton("->", this);
+    QPushButton *removeBtn = new QPushButton("<-", this);
+    midLayout->addStretch();
+    midLayout->addWidget(addBtn);
+    midLayout->addWidget(removeBtn);
+    midLayout->addStretch();
+
+    QVBoxLayout *rightLayout = new QVBoxLayout();
+    rightLayout->addWidget(new QLabel("Current Toolbar Actions:", this));
     activeList = new QListWidget(this);
-    activeLayout->addWidget(activeList);
+    rightLayout->addWidget(activeList);
 
-    QVBoxLayout *btnLayout = new QVBoxLayout();
-    QPushButton *addBtn = new QPushButton("Add ->", this);
-    QPushButton *removeBtn = new QPushButton("<- Remove", this);
-    btnLayout->addStretch();
-    btnLayout->addWidget(addBtn);
-    btnLayout->addWidget(removeBtn);
-    btnLayout->addStretch();
+    listLayout->addLayout(leftLayout);
+    listLayout->addLayout(midLayout);
+    listLayout->addLayout(rightLayout);
+    mainLayout->addLayout(listLayout);
 
-    mainLayout->addLayout(availLayout);
-    mainLayout->addLayout(btnLayout);
-    mainLayout->addLayout(activeLayout);
-
-    populateLists();
+    QPushButton *closeBtn = new QPushButton("Close", this);
+    connect(closeBtn, &QPushButton::clicked, this, &QDialog::accept);
+    mainLayout->addWidget(closeBtn);
 
     connect(addBtn, &QPushButton::clicked, this, &ToolbarCustomizeDialog::addActionToToolbar);
     connect(removeBtn, &QPushButton::clicked, this, &ToolbarCustomizeDialog::removeActionFromToolbar);
+
+    populateLists();
 }
 
 void ToolbarCustomizeDialog::populateLists() {
     availableList->clear();
     activeList->clear();
 
-    QList<QAction*> currentToolbarActions = toolbar->actions();
+    QList<QAction*> currentActions = toolbar->actions();
 
     for (QAction *act : availableActions) {
-        if (!act || act->text().isEmpty()) continue;
+        if (!currentActions.contains(act) && !act->text().isEmpty()) {
+            QListWidgetItem *item = new QListWidgetItem(act->text(), availableList);
+            item->setData(Qt::UserRole, QVariant::fromValue((void*)act));
+        }
+    }
 
-        QString cleanText = act->text();
-        cleanText.remove('&');
-
-        QListWidgetItem *item = new QListWidgetItem(cleanText);
-        item->setData(Qt::UserRole, QVariant::fromValue(act));
-
-        if (currentToolbarActions.contains(act)) {
-            activeList->addItem(item);
-        } else {
-            availableList->addItem(item);
+    for (QAction *act : currentActions) {
+        if (!act->text().isEmpty()) {
+            QListWidgetItem *item = new QListWidgetItem(act->text(), activeList);
+            item->setData(Qt::UserRole, QVariant::fromValue((void*)act));
         }
     }
 }
@@ -386,7 +487,7 @@ void ToolbarCustomizeDialog::addActionToToolbar() {
     QListWidgetItem *item = availableList->currentItem();
     if (!item) return;
 
-    QAction *act = item->data(Qt::UserRole).value<QAction*>();
+    QAction *act = static_cast<QAction*>(item->data(Qt::UserRole).value<void*>());
     if (act) {
         toolbar->addAction(act);
         populateLists();
@@ -397,7 +498,7 @@ void ToolbarCustomizeDialog::removeActionFromToolbar() {
     QListWidgetItem *item = activeList->currentItem();
     if (!item) return;
 
-    QAction *act = item->data(Qt::UserRole).value<QAction*>();
+    QAction *act = static_cast<QAction*>(item->data(Qt::UserRole).value<void*>());
     if (act) {
         toolbar->removeAction(act);
         populateLists();

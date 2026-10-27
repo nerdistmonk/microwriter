@@ -45,6 +45,20 @@ public:
     void redo() override { QTextEdit::redo(); }
     void setDarkMode(bool dark) override;
 
+    bool findText(const QString &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) override {
+        return QTextEdit::find(exp, options);
+    }
+    bool findRegExp(const QRegularExpression &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) override {
+        return QTextEdit::find(exp, options);
+    }
+    QTextCursor textCursor() const override { return QTextEdit::textCursor(); }
+    void setTextCursor(const QTextCursor &cursor) override { QTextEdit::setTextCursor(cursor); }
+    void moveCursor(QTextCursor::MoveOperation op) override { QTextEdit::moveCursor(op); }
+
+    // Layout Mode tracking
+    LayoutMode layoutMode() const { return m_layoutMode; }
+    void setLayoutMode(LayoutMode mode) { m_layoutMode = mode; }
+
     // View layout & margins
     bool isPrintLayout;
     QString headerText() const { return m_headerText; }
@@ -71,6 +85,8 @@ private:
     QString m_filePath;
     QString m_encodingName;
     EolFormat m_eolFormat;
+
+    LayoutMode m_layoutMode;
 
     QString m_headerText;
     QString m_footerText;

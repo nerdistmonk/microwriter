@@ -3,6 +3,9 @@
 
 #include <QWidget>
 #include <QString>
+#include <QTextCursor>
+#include <QTextDocument>
+#include <QRegularExpression>
 #include "types.h"
 
 class BaseEditor {
@@ -32,6 +35,13 @@ public:
     virtual void undo() = 0;
     virtual void redo() = 0;
     virtual void setDarkMode(bool dark) = 0;
+
+    // Search and cursor operations
+    virtual bool findText(const QString &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) = 0;
+    virtual bool findRegExp(const QRegularExpression &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) = 0;
+    virtual QTextCursor textCursor() const = 0;
+    virtual void setTextCursor(const QTextCursor &cursor) = 0;
+    virtual void moveCursor(QTextCursor::MoveOperation op) = 0;
 };
 
 #endif // BASEEDITOR_H

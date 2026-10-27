@@ -19,6 +19,7 @@
 
 EditorView::EditorView(QWidget *parent)
     : QTextEdit(parent),
+      m_layoutMode(NormalLayout),
       isPrintLayout(false),
       m_filePath(""),
       m_encodingName("UTF-8"),
@@ -50,6 +51,8 @@ void EditorView::setDarkMode(bool dark) {
 
 QString EditorView::getContentForSave() {
     QString content;
+    QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
+
     if (m_filePath.endsWith(".md")) {
         content = toMarkdown();
 
@@ -58,20 +61,49 @@ QString EditorView::getContentForSave() {
                 QTextFragment frag = it.fragment();
                 if (frag.isValid() && frag.charFormat().isImageFormat()) {
                     QTextImageFormat ifmt = frag.charFormat().toImageFormat();
+                    QString rawName = ifmt.name();
+                    QString relPath = docDir.relativeFilePath(rawName);
+                    relPath.replace('\\', '/');
+
+                    QRegularExpression imgRe("!\\[.*?\\]\\(" + QRegularExpression::escape(rawName) + "\\)");
+                    QString replacement;
                     if (ifmt.width() > 0 && ifmt.height() > 0) {
-                        QString target = QString("![image](%1)").arg(ifmt.name());
-                        QString replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
-                            .arg(ifmt.name())
+                        replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
+                            .arg(relPath)
                             .arg((int)ifmt.width())
                             .arg((int)ifmt.height());
-                        content.replace(target, replacement);
+                    } else {
+                        replacement = QString("![](%1)").arg(relPath);
                     }
+                    content.replace(imgRe, replacement);
                 }
             }
         }
+
+        // Collapse newlines between adjacent image tags so they stay on the same line in Markdown
+        content.replace(QRegularExpression("(</img>|<img[^>]+/>)\\s*\\n\\s*(<img)"), "\\1 \\2");
     } else if (m_filePath.endsWith(".html") || m_filePath.endsWith(".htm")) {
         content = toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
+
+        QRegularExpression imgTagRe("<img[^>]+src=\"([^\"\\>]+)\"[^>]*>");
+        QRegularExpressionMatchIterator iter = imgTagRe.globalMatch(content);
+        QMap<QString, QString> replacements;
+
+        while (iter.hasNext()) {
+            QRegularExpressionMatch match = iter.next();
+            QString src = match.captured(1);
+            if (QDir::isAbsolutePath(src) || src.startsWith("file:")) {
+                QString localFile = src.startsWith("file:") ? QUrl(src).toLocalFile() : src;
+                QString relPath = docDir.relativeFilePath(localFile);
+                relPath.replace('\\', '/');
+                replacements[src] = relPath;
+            }
+        }
+
+        for (auto it = replacements.constBegin(); it != replacements.constEnd(); ++it) {
+            content.replace(QString("src=\"%1\"").arg(it.key()), QString("src=\"%1\"").arg(it.value()));
+        }
     } else {
         content = toPlainText();
     }
@@ -87,6 +119,7 @@ void EditorView::setContent(const QString &content, const QString &fileName) {
     } else {
         setPlainText(content);
     }
+    m_selectedImagePos = -1;
     document()->setModified(false);
 }
 
@@ -165,16 +198,17 @@ QRect EditorView::cornerHandleRect() const {
 }
 
 void EditorView::keyPressEvent(QKeyEvent *event) {
+    if (m_selectedImagePos != -1) {
+        m_selectedImagePos = -1;
+        viewport()->update();
+    }
+
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         QTextCharFormat formatToKeep = currentCharFormat();
 
-        // Block signals briefly so intermediate cursor change doesn't flash default font in toolbar
         bool oldBlocked = blockSignals(true);
-
         QTextEdit::keyPressEvent(event);
-
         setCurrentCharFormat(formatToKeep);
-
         blockSignals(oldBlocked);
 
         emit cursorPositionChanged();
@@ -186,13 +220,11 @@ void EditorView::keyPressEvent(QKeyEvent *event) {
 
 QVariant EditorView::loadResource(int type, const QUrl &name) {
     if (type == QTextDocument::ImageResource) {
-        // Check document resource cache first
         QVariant res = QTextEdit::loadResource(type, name);
         if (res.isValid() && !res.isNull()) {
             return res;
         }
 
-        // If not cached, resolve relative to file location
         QString rawPath = name.toLocalFile();
         if (rawPath.isEmpty()) {
             rawPath = name.toString();
@@ -289,7 +321,8 @@ void EditorView::mouseMoveEvent(QMouseEvent *event) {
         QRect imgRect = currentImageRect();
         int newWidth = event->pos().x() - imgRect.left();
         if (newWidth < 40) newWidth = 40;
-        int newHeight = qRound(newWidth / m_imageAspectRatio);
+        int newHeight = (int)(newWidth / m_imageAspectRatio);
+        if (newHeight < 40) newHeight = 40;
 
         m_dragWidth = newWidth;
         m_dragHeight = newHeight;
@@ -297,33 +330,26 @@ void EditorView::mouseMoveEvent(QMouseEvent *event) {
         return;
     }
 
-    if (m_selectedImagePos >= 0 && cornerHandleRect().contains(event->pos())) {
-        viewport()->setCursor(Qt::SizeFDiagCursor);
-    } else {
-        viewport()->setCursor(Qt::IBeamCursor);
-    }
-
     QTextEdit::mouseMoveEvent(event);
 }
 
 void EditorView::mouseReleaseEvent(QMouseEvent *event) {
-    if (event->button() == Qt::LeftButton && m_isResizingImage) {
+    if (m_isResizingImage && m_selectedImagePos >= 0) {
         m_isResizingImage = false;
 
-        if (m_selectedImagePos >= 0) {
-            QTextCursor c(document());
-            c.setPosition(m_selectedImagePos);
-            c.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+        QTextCursor c(document());
+        c.setPosition(m_selectedImagePos);
+        c.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
 
-            if (c.charFormat().isImageFormat()) {
-                QTextImageFormat fmt = c.charFormat().toImageFormat();
-                fmt.setWidth(m_dragWidth);
-                fmt.setHeight(m_dragHeight);
-                c.setCharFormat(fmt);
-                document()->setModified(true);
-            }
+        QTextCharFormat fmt = c.charFormat();
+        if (fmt.isImageFormat()) {
+            QTextImageFormat imgFmt = fmt.toImageFormat();
+            imgFmt.setWidth(m_dragWidth);
+            imgFmt.setHeight(m_dragHeight);
+            c.setCharFormat(imgFmt);
         }
 
+        m_selectedImagePos = -1;
         viewport()->update();
         return;
     }
@@ -331,66 +357,26 @@ void EditorView::mouseReleaseEvent(QMouseEvent *event) {
     QTextEdit::mouseReleaseEvent(event);
 }
 
-void EditorView::paintEvent(QPaintEvent *event) {
-    QTextEdit::paintEvent(event);
-
-    if (m_selectedImagePos != -1) {
-        QRect imgRect = currentImageRect();
-        if (!imgRect.isEmpty()) {
-            QPainter painter(viewport());
-            painter.setRenderHint(QPainter::Antialiasing, false);
-
-            painter.setPen(QPen(QColor(0, 120, 215), 2, Qt::SolidLine));
-            painter.drawRect(imgRect);
-
-            QRect handle = cornerHandleRect();
-            painter.fillRect(handle, QColor(0, 120, 215));
-            painter.setPen(QColor(255, 255, 255));
-            painter.drawRect(handle);
-        }
-    }
-
-    if (isPrintLayout) {
-        QPainter painter(viewport());
-        painter.setPen(QPen(QColor(200, 50, 50), 2, Qt::DashLine));
-        painter.setFont(QFont("Arial", 9, QFont::Bold));
-
-        const int pageHeight = 1056; // 11 inches at 96 DPI
-        const int scrollOffset = verticalScrollBar()->value();
-        const int totalDocHeight = document()->size().height();
-
-        for (int y = pageHeight; y < totalDocHeight; y += pageHeight) {
-            int viewY = y - scrollOffset;
-            if (viewY >= 0 && viewY <= viewport()->height()) {
-                painter.drawLine(0, viewY, viewport()->width(), viewY);
-                painter.setPen(QColor(150, 30, 30));
-                painter.drawText(20, viewY - 6, QString("=== Page Break (Page %1) ===").arg((y / pageHeight) + 1));
-                painter.setPen(QPen(QColor(200, 50, 50), 2, Qt::DashLine));
-            }
-        }
-    }
-}
-
 void EditorView::contextMenuEvent(QContextMenuEvent *event) {
     QMenu *menu = createStandardContextMenu();
 
     QTextCursor cursor = cursorForPosition(event->pos());
     cursor.select(QTextCursor::WordUnderCursor);
-    QString word = cursor.selectedText();
+    QString word = cursor.selectedText().trimmed();
 
-    if (!word.trimmed().isEmpty()) {
+    if (!word.isEmpty()) {
         QStringList suggestions = getAspellSuggestions(word);
         if (!suggestions.isEmpty()) {
-            menu->addSeparator();
-            QMenu *spellMenu = menu->addMenu("Spelling Suggestions");
-            for (const QString &suggestion : suggestions) {
-                QAction *action = spellMenu->addAction(suggestion);
-                connect(action, &QAction::triggered, this, [=]() {
-                    QTextCursor c = cursorForPosition(event->pos());
-                    c.select(QTextCursor::WordUnderCursor);
-                    c.insertText(suggestion);
+            QMenu *spellMenu = new QMenu(tr("Spelling Suggestions"), menu);
+            for (const QString &s : suggestions) {
+                QAction *act = spellMenu->addAction(s);
+                connect(act, &QAction::triggered, this, [this, cursor, s](){
+                    QTextCursor c = cursor;
+                    c.insertText(s);
                 });
             }
+            menu->insertMenu(menu->actions().first(), spellMenu);
+            menu->insertSeparator(menu->actions().at(1));
         }
     }
 
@@ -398,26 +384,48 @@ void EditorView::contextMenuEvent(QContextMenuEvent *event) {
     delete menu;
 }
 
+void EditorView::paintEvent(QPaintEvent *event) {
+    QTextEdit::paintEvent(event);
+
+    if (m_selectedImagePos >= 0) {
+        QRect imgRect = currentImageRect();
+        if (!imgRect.isEmpty()) {
+            QPainter painter(viewport());
+            painter.setRenderHint(QPainter::Antialiasing, false);
+
+            QPen pen(QColor(0, 120, 215), 1, Qt::DashLine);
+            painter.setPen(pen);
+            painter.setBrush(Qt::NoBrush);
+            painter.drawRect(imgRect);
+
+            QRect handle = cornerHandleRect();
+            painter.setPen(QColor(0, 120, 215));
+            painter.setBrush(QColor(255, 255, 255));
+            painter.drawRect(handle);
+        }
+    }
+}
+
 QStringList EditorView::getAspellSuggestions(const QString &word) {
-    QProcess process;
-    process.start("aspell", QStringList() << "-a");
-    if (!process.waitForStarted()) return QStringList();
+    QProcess aspell;
+    aspell.start("aspell", QStringList() << "-a");
+    if (!aspell.waitForStarted(1000)) return QStringList();
 
-    process.write(word.toUtf8() + "\n");
-    process.closeWriteChannel();
-    process.waitForFinished();
+    aspell.write(word.toUtf8() + "\n");
+    aspell.closeWriteChannel();
+    if (!aspell.waitForFinished(1000)) return QStringList();
 
-    QString output = QString::fromUtf8(process.readAllStandardOutput());
-    QStringList suggestions;
-    QStringList lines = output.split('\n', Qt::SkipEmptyParts);
+    QString out = QString::fromUtf8(aspell.readAllStandardOutput());
+    QStringList lines = out.split('\n', Qt::SkipEmptyParts);
+
     for (const QString &line : lines) {
-        if (line.startsWith('&')) {
-            int colonIndex = line.indexOf(':');
-            if (colonIndex != -1) {
-                QString sugPart = line.mid(colonIndex + 1).trimmed();
-                suggestions = sugPart.split(", ");
+        if (line.startsWith("&")) {
+            int colonIdx = line.indexOf(':');
+            if (colonIdx != -1) {
+                QString listPart = line.mid(colonIdx + 1).trimmed();
+                return listPart.split(", ", Qt::SkipEmptyParts);
             }
         }
     }
-    return suggestions;
+    return QStringList();
 }

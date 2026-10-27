@@ -43,16 +43,23 @@ public slots:
     void fontSize(int size);
 
     void createNewToolbar();
+    void customizeToolbar(QToolBar *toolbar = nullptr);
+    void removeToolbar(QToolBar *toolbar);
+    void nextTab();
 
 protected:
     void closeEvent(QCloseEvent *event) override;
     QMenu* createPopupMenu() override;
 
 private:
-    void createDefaultToolBar();
     void createStatusBar();
     void saveToolbarSettings();
     void loadToolbarSettings();
+    void switchToolbarProfile(bool toCode);
+    void clearActiveToolbars();
+    void buildDefaultRichToolbars();
+    void buildDefaultCodeToolbars();
+
     bool maybeSaveTab(int index);
     void writeFile(const QString &fileName);
     void applyLayoutModeToEditor(EditorView *editor, LayoutMode mode);
@@ -71,6 +78,7 @@ private:
     bool darkModeActive;
     QAction *darkAct;
     QList<QToolBar*> toolbars;
+    bool m_codeToolbarsActive;
 };
 
 #endif // MICROWRITER_H

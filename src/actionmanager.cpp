@@ -15,7 +15,7 @@
 #include <QInputDialog>
 
 ActionManager::ActionManager(MicroWriter *window)
-    : QObject(window), m_window(window)
+    : QObject(window), m_window(window), m_formatMenu(nullptr), m_layoutGrp(nullptr)
 {
 }
 
@@ -27,6 +27,18 @@ void ActionManager::registerAction(QAction *act) {
         key = key.trimmed();
         act->setObjectName(key);
         m_actionMap[key] = act;
+    }
+}
+
+void ActionManager::syncLayoutModeAction(LayoutMode mode) {
+    if (m_layoutActions.contains(mode)) {
+        m_layoutActions[mode]->setChecked(true);
+    }
+}
+
+void ActionManager::setFormatMenuVisible(bool visible) {
+    if (m_formatMenu) {
+        m_formatMenu->menuAction()->setVisible(visible);
     }
 }
 
@@ -54,8 +66,8 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     for (const QString &enc : {"UTF-8", "UTF-16", "ISO-8859-1", "Windows-1252"}) {
         QAction *act = new QAction(enc, m_window);
         act->setCheckable(true);
-        if (enc == "UTF-8") act->setChecked(true);
         encGrp->addAction(act);
+        if (enc == "UTF-8") act->setChecked(true);
         encMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, enc](){
             if (m_window->currentBaseEditor()) {
@@ -70,8 +82,8 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     auto addEol = [&](const QString &label, EolFormat eol, bool check) {
         QAction *act = new QAction(label, m_window);
         act->setCheckable(true);
-        if (check) act->setChecked(true);
         eolGrp->addAction(act);
+        if (check) act->setChecked(true);
         eolMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, eol](){
             if (m_window->currentBaseEditor()) {
@@ -89,7 +101,10 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     auto addExportAct = [&](const QString &title, const QKeySequence &seq, auto fn) {
         QAction *act = new QAction(title, m_window);
         if (!seq.isEmpty()) act->setShortcut(seq);
-        connect(act, &QAction::triggered, this, [this, fn](){ fn(m_window->currentEditor(), m_window); });
+        connect(act, &QAction::triggered, this, [this, fn](){
+            EditorView *ed = m_window->currentEditor();
+            if (ed) fn(ed, m_window);
+        });
         fileMenu->addAction(act);
         registerAction(act);
     };
@@ -121,8 +136,9 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     QAction *findAct = new QAction(tr("&Find & Replace..."), m_window);
     findAct->setShortcut(QKeySequence::Find);
     connect(findAct, &QAction::triggered, this, [this](){
-        if (!m_window->currentEditor()) return;
-        FindReplaceDialog *dlg = new FindReplaceDialog(m_window->currentEditor(), m_window);
+        BaseEditor *base = m_window->currentBaseEditor();
+        if (!base) return;
+        FindReplaceDialog *dlg = new FindReplaceDialog(base, m_window);
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->show();
     });
@@ -130,15 +146,17 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     registerAction(findAct);
 
     // --- Format Menu ---
-    QMenu *fmtMenu = menuBar->addMenu(tr("&Format"));
+    m_formatMenu = menuBar->addMenu(tr("&Format"));
     auto addFmt = [&](const QString &title, const QKeySequence &seq, auto fn) {
         QAction *act = new QAction(title, m_window);
         if (!seq.isEmpty()) act->setShortcut(seq);
         connect(act, &QAction::triggered, this, [this, fn](){
-            fn(m_window->currentEditor());
+            EditorView *ed = m_window->currentEditor();
+            if (!ed) return;
+            fn(ed);
             m_window->updateFormatToolbarState();
         });
-        fmtMenu->addAction(act);
+        m_formatMenu->addAction(act);
         registerAction(act);
     };
 
@@ -149,25 +167,31 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     addFmt(tr("Superscript"), QKeySequence(), DocumentFormatter::toggleSuperscript);
     addFmt(tr("Subscript"), QKeySequence(), DocumentFormatter::toggleSubscript);
 
-    fmtMenu->addSeparator();
+    m_formatMenu->addSeparator();
     auto addFmtDlg = [&](const QString &title, auto fn) {
         QAction *act = new QAction(title, m_window);
         connect(act, &QAction::triggered, this, [this, fn](){
-            fn(m_window->currentEditor(), m_window);
+            EditorView *ed = m_window->currentEditor();
+            if (!ed) return;
+            fn(ed, m_window);
             m_window->updateFormatToolbarState();
         });
-        fmtMenu->addAction(act);
+        m_formatMenu->addAction(act);
         registerAction(act);
     };
 
     addFmtDlg(tr("Text &Color..."), DocumentFormatter::applyTextColor);
     addFmtDlg(tr("Text &Shading..."), DocumentFormatter::applyTextShading);
 
-    fmtMenu->addSeparator();
+    m_formatMenu->addSeparator();
     auto addAlign = [&](const QString &title, Qt::Alignment align) {
         QAction *act = new QAction(title, m_window);
-        connect(act, &QAction::triggered, this, [this, align](){ DocumentFormatter::setAlignment(m_window->currentEditor(), align); });
-        fmtMenu->addAction(act);
+        connect(act, &QAction::triggered, this, [this, align](){
+            EditorView *ed = m_window->currentEditor();
+            if (!ed) return;
+            DocumentFormatter::setAlignment(ed, align);
+        });
+        m_formatMenu->addAction(act);
         registerAction(act);
     };
     addAlign(tr("Align &Left"), Qt::AlignLeft);
@@ -175,18 +199,17 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     addAlign(tr("Align &Right"), Qt::AlignRight);
     addAlign(tr("&Justify"), Qt::AlignJustify);
 
-    fmtMenu->addSeparator();
+    m_formatMenu->addSeparator();
     QAction *doubleSpace = new QAction(tr("Double Spacing"), m_window);
     doubleSpace->setCheckable(true);
-    connect(doubleSpace, &QAction::triggered, this, [this](bool checked){ DocumentFormatter::toggleDoubleSpacing(m_window->currentEditor(), checked); });
-    fmtMenu->addAction(doubleSpace);
+    connect(doubleSpace, &QAction::triggered, this, [this](bool checked){
+        EditorView *ed = m_window->currentEditor();
+        if (ed) DocumentFormatter::toggleDoubleSpacing(ed, checked);
+    });
+    m_formatMenu->addAction(doubleSpace);
     registerAction(doubleSpace);
 
-    addFmt(tr("Indent"), QKeySequence(), TextTools::indent);
-    addFmt(tr("Unindent"), QKeySequence(), TextTools::unindent);
-    addFmt(tr("Strip Blank Lines"), QKeySequence(), TextTools::stripBlankLines);
-
-    fmtMenu->addSeparator();
+    m_formatMenu->addSeparator();
     addFmt(tr("Bullet &List"), QKeySequence(), DocumentFormatter::insertBulletList);
     addFmt(tr("&Numbered List"), QKeySequence(), DocumentFormatter::insertNumberedList);
     addFmt(tr("Blockquote"), QKeySequence(), DocumentFormatter::insertBlockquote);
@@ -197,7 +220,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     addFmtDlg(tr("Insert &Link..."), DocumentFormatter::insertLink);
     addFmtDlg(tr("Insert &Symbol..."), DocumentFormatter::insertSymbol);
 
-    fmtMenu->addSeparator();
+    m_formatMenu->addSeparator();
     addFmtDlg(tr("Insert &Image..."), DocumentFormatter::insertImage);
     addFmtDlg(tr("Header & Footer..."), DocumentFormatter::configureHeaderFooter);
 
@@ -205,11 +228,30 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     QMenu *toolsMenu = menuBar->addMenu(tr("&Tools"));
     auto addTool = [&](const QString &title, auto fn) {
         QAction *act = new QAction(title, m_window);
-        connect(act, &QAction::triggered, this, [this, fn](){ fn(m_window->currentEditor()); });
+        connect(act, &QAction::triggered, this, [this, fn](){
+            BaseEditor *base = m_window->currentBaseEditor();
+            if (base) fn(base);
+        });
         toolsMenu->addAction(act);
         registerAction(act);
     };
 
+    auto addBaseTool = [&](const QString &title, const QKeySequence &seq, auto fn) {
+        QAction *act = new QAction(title, m_window);
+        if (!seq.isEmpty()) act->setShortcut(seq);
+        connect(act, &QAction::triggered, this, [this, fn](){
+            BaseEditor *base = m_window->currentBaseEditor();
+            if (base) fn(base);
+        });
+        toolsMenu->addAction(act);
+        registerAction(act);
+    };
+
+    addBaseTool(tr("Indent"), QKeySequence(), TextTools::indent);
+    addBaseTool(tr("Unindent"), QKeySequence(), TextTools::unindent);
+    addBaseTool(tr("Strip Blank Lines"), QKeySequence(), TextTools::stripBlankLines);
+
+    toolsMenu->addSeparator();
     addTool(tr("Sort Lines (Ignore Case)"), TextTools::sortLines);
     addTool(tr("Reverse Lines"), TextTools::reverseLines);
 
@@ -217,7 +259,10 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     QMenu *caseMenu = toolsMenu->addMenu(tr("Fix Case"));
     auto addCase = [&](const QString &title, auto fn) {
         QAction *act = new QAction(title, m_window);
-        connect(act, &QAction::triggered, this, [this, fn](){ fn(m_window->currentEditor()); });
+        connect(act, &QAction::triggered, this, [this, fn](){
+            BaseEditor *base = m_window->currentBaseEditor();
+            if (base) fn(base);
+        });
         caseMenu->addAction(act);
         registerAction(act);
     };
@@ -228,18 +273,22 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     toolsMenu->addSeparator();
     QAction *pfxAct = new QAction(tr("Add Prefix..."), m_window);
     connect(pfxAct, &QAction::triggered, this, [this](){
+        BaseEditor *base = m_window->currentBaseEditor();
+        if (!base) return;
         bool ok;
         QString p = QInputDialog::getText(m_window, "Add Prefix", "Enter prefix string:", QLineEdit::Normal, "", &ok);
-        if (ok) TextTools::addPrefix(m_window->currentEditor(), p);
+        if (ok) TextTools::addPrefix(base, p);
     });
     toolsMenu->addAction(pfxAct);
     registerAction(pfxAct);
 
     QAction *sfxAct = new QAction(tr("Add Suffix..."), m_window);
     connect(sfxAct, &QAction::triggered, this, [this](){
+        BaseEditor *base = m_window->currentBaseEditor();
+        if (!base) return;
         bool ok;
         QString s = QInputDialog::getText(m_window, "Add Suffix", "Enter suffix string:", QLineEdit::Normal, "", &ok);
-        if (ok) TextTools::addSuffix(m_window->currentEditor(), s);
+        if (ok) TextTools::addSuffix(base, s);
     });
     toolsMenu->addAction(sfxAct);
     registerAction(sfxAct);
@@ -250,25 +299,40 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
 
     // --- View Menu ---
     QMenu *viewMenu = menuBar->addMenu(tr("&View"));
+
+    QAction *nextTabAct = new QAction(tr("Next &Tab"), m_window);
+    nextTabAct->setShortcut(QKeySequence(Qt::ALT | Qt::Key_Q));
+    connect(nextTabAct, &QAction::triggered, m_window, &MicroWriter::nextTab);
+    m_window->addAction(nextTabAct);
+    viewMenu->addAction(nextTabAct);
+    registerAction(nextTabAct);
+
+    viewMenu->addSeparator();
     QAction *newTb = new QAction(tr("Create New Toolbar..."), m_window);
     connect(newTb, &QAction::triggered, m_window, &MicroWriter::createNewToolbar);
     viewMenu->addAction(newTb);
 
     viewMenu->addSeparator();
     QMenu *layoutMenu = viewMenu->addMenu(tr("&Layout Mode"));
-    QActionGroup *layoutGrp = new QActionGroup(m_window);
-    auto addLayout = [&](const QString &title, LayoutMode mode, bool checked) {
+    m_layoutGrp = new QActionGroup(this);
+    m_layoutGrp->setExclusive(true);
+
+    auto addLayout = [&](const QString &title, const QKeySequence &seq, LayoutMode mode, bool checked) {
         QAction *act = new QAction(title, m_window);
         act->setCheckable(true);
-        if (checked) act->setChecked(true);
-        layoutGrp->addAction(act);
+        if (!seq.isEmpty()) act->setShortcut(seq);
+        m_layoutGrp->addAction(act);
         layoutMenu->addAction(act);
+        if (checked) act->setChecked(true);
         connect(act, &QAction::triggered, m_window, [this, mode](){ m_window->setLayoutMode(mode); });
+        registerAction(act);
+        m_layoutActions[mode] = act;
     };
-    addLayout(tr("&Normal Layout"), NormalLayout, true);
-    addLayout(tr("&Web Layout"), WebLayout, false);
-    addLayout(tr("&Print Layout"), PrintLayout, false);
-    addLayout(tr("&Code Layout"), CodeLayout, false);
+
+    addLayout(tr("&Normal Layout"), QKeySequence(Qt::CTRL | Qt::Key_1), NormalLayout, true);
+    addLayout(tr("&Web Layout"), QKeySequence(Qt::CTRL | Qt::Key_2), WebLayout, false);
+    addLayout(tr("&Print Layout"), QKeySequence(Qt::CTRL | Qt::Key_3), PrintLayout, false);
+    addLayout(tr("&Code Layout"), QKeySequence(Qt::CTRL | Qt::Key_4), CodeLayout, false);
 
     viewMenu->addSeparator();
     QAction *darkAct = new QAction(tr("Dark Mode"), m_window);
@@ -281,11 +345,20 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     QMenu *helpMenu = menuBar->addMenu(tr("&Help"));
     QAction *regexHelp = new QAction(tr("Regex Cheat Sheet..."), m_window);
     connect(regexHelp, &QAction::triggered, this, [this](){
-        if (!m_window->currentEditor()) return;
-        RegexHelpDialog dlg(m_window->currentEditor(), m_window);
+        EditorView *ed = m_window->currentEditor();
+        if (!ed) return;
+        RegexHelpDialog dlg(ed, m_window);
         dlg.exec();
     });
     helpMenu->addAction(regexHelp);
+
+    QAction *htmlHelp = new QAction(tr("HTML Cheat Sheet..."), m_window);
+    connect(htmlHelp, &QAction::triggered, this, [this](){
+        BaseEditor *base = m_window->currentBaseEditor();
+        HtmlHelpDialog dlg(base, m_window);
+        dlg.exec();
+    });
+    helpMenu->addAction(htmlHelp);
 }
 
 void ActionManager::setupDefaultToolBar(QToolBar *toolbar) {

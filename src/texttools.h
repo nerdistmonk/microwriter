@@ -3,30 +3,31 @@
 
 #include <QString>
 #include <QStringList>
-#include <functional>
 
 class QTextEdit;
+class QPlainTextEdit;
+class QTextDocument;
+class QTextCursor;
+class BaseEditor;
 
 namespace TextTools {
 
-void modifySelectedLines(QTextEdit *editor, std::function<QStringList(QStringList)> transformer);
+void indent(BaseEditor *editor);
+void unindent(BaseEditor *editor);
+void stripBlankLines(BaseEditor *editor);
 
-void indent(QTextEdit *editor);
-void unindent(QTextEdit *editor);
-void stripBlankLines(QTextEdit *editor);
+void reverseLines(BaseEditor *editor);
+void sortLines(BaseEditor *editor);
 
-void reverseLines(QTextEdit *editor);
-void sortLines(QTextEdit *editor);
+void toUppercase(BaseEditor *editor);
+void toLowercase(BaseEditor *editor);
+void toTitleCase(BaseEditor *editor);
 
-void toUppercase(QTextEdit *editor);
-void toLowercase(QTextEdit *editor);
-void toTitleCase(QTextEdit *editor);
+void addPrefix(BaseEditor *editor, const QString &prefix);
+void addSuffix(BaseEditor *editor, const QString &suffix);
 
-void addPrefix(QTextEdit *editor, const QString &prefix);
-void addSuffix(QTextEdit *editor, const QString &suffix);
-
-void tabsToSpaces(QTextEdit *editor);
-void spacesToTabs(QTextEdit *editor);
+void tabsToSpaces(BaseEditor *editor);
+void spacesToTabs(BaseEditor *editor);
 
 } // namespace TextTools
 

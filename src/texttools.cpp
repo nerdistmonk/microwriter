@@ -1,6 +1,10 @@
 #include "texttools.h"
+#include "baseeditor.h"
+#include "editorview.h"
+#include "codeeditorview.h"
 
 #include <QTextEdit>
+#include <QPlainTextEdit>
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTextBlock>
@@ -9,20 +13,42 @@
 
 namespace TextTools {
 
+// Helper: Extract document and text cursor from any BaseEditor
+static bool getEditorState(BaseEditor *base, QTextDocument *&doc, QTextCursor &cursor) {
+    if (!base) return false;
+    if (EditorView *ed = dynamic_cast<EditorView*>(base)) {
+        doc = ed->document();
+        cursor = ed->textCursor();
+        return doc != nullptr;
+    } else if (CodeEditorView *ce = dynamic_cast<CodeEditorView*>(base)) {
+        doc = ce->document();
+        cursor = ce->textCursor();
+        return doc != nullptr;
+    }
+    return false;
+}
+
+static void applyCursorBack(BaseEditor *base, const QTextCursor &cursor) {
+    if (!base) return;
+    if (EditorView *ed = dynamic_cast<EditorView*>(base)) {
+        ed->setTextCursor(cursor);
+    } else if (CodeEditorView *ce = dynamic_cast<CodeEditorView*>(base)) {
+        ce->setTextCursor(cursor);
+    }
+}
+
 // Helper: Safely resolve the affected block range without altering cursor state
-static void getBlockRange(QTextEdit *editor, int &startBlockNum, int &endBlockNum) {
-    QTextCursor cursor = editor->textCursor();
+static void getBlockRange(QTextDocument *doc, const QTextCursor &cursor, int &startBlockNum, int &endBlockNum) {
     if (cursor.hasSelection()) {
         int startPos = qMin(cursor.selectionStart(), cursor.selectionEnd());
         int endPos = qMax(cursor.selectionStart(), cursor.selectionEnd());
 
-        QTextCursor startCursor(editor->document());
+        QTextCursor startCursor(doc);
         startCursor.setPosition(startPos);
         startBlockNum = startCursor.blockNumber();
 
-        QTextCursor endCursor(editor->document());
+        QTextCursor endCursor(doc);
         endCursor.setPosition(endPos);
-        // Exclude the next block if the selection ended right at its start boundary
         if (endCursor.atBlockStart() && endPos > startPos) {
             endBlockNum = endCursor.blockNumber() - 1;
         } else {
@@ -30,7 +56,7 @@ static void getBlockRange(QTextEdit *editor, int &startBlockNum, int &endBlockNu
         }
     } else {
         startBlockNum = 0;
-        endBlockNum = editor->document()->blockCount() - 1;
+        endBlockNum = doc->blockCount() - 1;
     }
 }
 
@@ -45,22 +71,19 @@ struct LineBlockData {
     QString plainText;
 };
 
-// -------------------------------------------------------------------------
-// Reorder operations: Sort, Reverse
-// Swaps contents into existing blocks without creating/deleting block separators
-// -------------------------------------------------------------------------
-static void reorderBlocks(QTextEdit *editor, std::function<void(QList<LineBlockData>&)> reorderFn) {
-    if (!editor) return;
+static void reorderBlocks(BaseEditor *editor, std::function<void(QList<LineBlockData>&)> reorderFn) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
 
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
     if (startBlockNum >= endBlockNum) return;
 
-    // 1. Snapshot original lines and their exact rich-text fragments
     QList<LineBlockData> lines;
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         LineBlockData ld;
         ld.plainText = blk.text();
         ld.blockFormat = blk.blockFormat();
@@ -74,49 +97,37 @@ static void reorderBlocks(QTextEdit *editor, std::function<void(QList<LineBlockD
         lines.append(ld);
     }
 
-    // 2. Perform the reorder logic
     reorderFn(lines);
 
-    // 3. Apply changes inside a single undo block without touching block separators
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = 0; i < lines.size(); ++i) {
-        QTextBlock targetBlk = editor->document()->findBlockByNumber(startBlockNum + i);
+        QTextBlock targetBlk = doc->findBlockByNumber(startBlockNum + i);
         const LineBlockData &src = lines.at(i);
 
-        // Clear line content without removing the block separator
         QTextCursor blkCursor(targetBlk);
         blkCursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
         blkCursor.removeSelectedText();
 
-        // Restore paragraph styling (e.g. alignment)
         blkCursor.setBlockFormat(src.blockFormat);
-
-        // Re-insert exact styled fragments
         for (const auto &frag : src.fragments) {
             blkCursor.insertText(frag.text, frag.format);
         }
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-// -------------------------------------------------------------------------
-// In-place text transforms: UPPERCASE, lowercase, Title Case, Tabs/Spaces
-// Modifies individual fragments from right-to-left to keep offsets stable
-// -------------------------------------------------------------------------
-static void transformFragments(QTextEdit *editor, std::function<QString(const QString&)> transformFn) {
-    if (!editor) return;
+static void transformFragments(BaseEditor *editor, std::function<QString(const QString&)> transformFn) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
 
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         if (!blk.isValid()) continue;
 
         struct Snapshot {
@@ -134,55 +145,53 @@ static void transformFragments(QTextEdit *editor, std::function<QString(const QS
             }
         }
 
-        // Right to left prevents index shifting
         for (int s = snp.size() - 1; s >= 0; --s) {
             const Snapshot &item = snp.at(s);
             QString modified = transformFn(item.text);
             if (modified != item.text) {
-                QTextCursor fc(editor->document());
+                QTextCursor fc(doc);
                 fc.setPosition(item.pos);
                 fc.setPosition(item.pos + item.len, QTextCursor::KeepAnchor);
                 fc.insertText(modified, item.format);
             }
         }
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-// -------------------------------------------------------------------------
-// Line Edge Operations: Indent, Unindent, Prefix, Suffix
-// -------------------------------------------------------------------------
-void indent(QTextEdit *editor) {
-    if (!editor) return;
+void indent(BaseEditor *editor) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         if (!blk.isValid()) continue;
 
         QTextCursor c(blk);
         QTextCharFormat fmt = (blk.begin() != blk.end()) ? blk.begin().fragment().charFormat() : QTextCharFormat();
         c.insertText("    ", fmt);
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-void unindent(QTextEdit *editor) {
-    if (!editor) return;
+void unindent(BaseEditor *editor) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         if (!blk.isValid()) continue;
 
         QString t = blk.text();
@@ -196,32 +205,32 @@ void unindent(QTextEdit *editor) {
             c.removeSelectedText();
         }
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-void stripBlankLines(QTextEdit *editor) {
-    if (!editor) return;
+void stripBlankLines(BaseEditor *editor) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
-    // Bottom-to-top traversal so removing lines does not shift block indices
     for (int i = endBlockNum; i >= startBlockNum; --i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
-        if (blk.isValid() && blk.text().trimmed().isEmpty() && editor->document()->blockCount() > 1) {
+        QTextBlock blk = doc->findBlockByNumber(i);
+        if (blk.isValid() && blk.text().trimmed().isEmpty() && doc->blockCount() > 1) {
             QTextCursor c(blk);
             c.select(QTextCursor::BlockUnderCursor);
             c.removeSelectedText();
         }
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-void sortLines(QTextEdit *editor) {
+void sortLines(BaseEditor *editor) {
     reorderBlocks(editor, [](QList<LineBlockData> &lines) {
         std::sort(lines.begin(), lines.end(), [](const LineBlockData &a, const LineBlockData &b) {
             return QString::compare(a.plainText, b.plainText, Qt::CaseInsensitive) < 0;
@@ -229,21 +238,21 @@ void sortLines(QTextEdit *editor) {
     });
 }
 
-void reverseLines(QTextEdit *editor) {
+void reverseLines(BaseEditor *editor) {
     reorderBlocks(editor, [](QList<LineBlockData> &lines) {
         std::reverse(lines.begin(), lines.end());
     });
 }
 
-void toUppercase(QTextEdit *editor) {
+void toUppercase(BaseEditor *editor) {
     transformFragments(editor, [](const QString &t) { return t.toUpper(); });
 }
 
-void toLowercase(QTextEdit *editor) {
+void toLowercase(BaseEditor *editor) {
     transformFragments(editor, [](const QString &t) { return t.toLower(); });
 }
 
-void toTitleCase(QTextEdit *editor) {
+void toTitleCase(BaseEditor *editor) {
     transformFragments(editor, [](const QString &t) {
         QString res;
         bool cap = true;
@@ -263,36 +272,40 @@ void toTitleCase(QTextEdit *editor) {
     });
 }
 
-void addPrefix(QTextEdit *editor, const QString &prefix) {
+void addPrefix(BaseEditor *editor, const QString &prefix) {
     if (!editor || prefix.isEmpty()) return;
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         if (!blk.isValid()) continue;
 
         QTextCursor c(blk);
         QTextCharFormat fmt = (blk.begin() != blk.end()) ? blk.begin().fragment().charFormat() : QTextCharFormat();
         c.insertText(prefix, fmt);
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-void addSuffix(QTextEdit *editor, const QString &suffix) {
+void addSuffix(BaseEditor *editor, const QString &suffix) {
     if (!editor || suffix.isEmpty()) return;
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
     int startBlockNum, endBlockNum;
-    getBlockRange(editor, startBlockNum, endBlockNum);
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
 
-    QTextCursor cursor = editor->textCursor();
     cursor.beginEditBlock();
-
     for (int i = startBlockNum; i <= endBlockNum; ++i) {
-        QTextBlock blk = editor->document()->findBlockByNumber(i);
+        QTextBlock blk = doc->findBlockByNumber(i);
         if (!blk.isValid()) continue;
 
         QTextCursor c(blk);
@@ -300,24 +313,21 @@ void addSuffix(QTextEdit *editor, const QString &suffix) {
         QTextCharFormat fmt = (blk.begin() != blk.end()) ? blk.charFormat() : QTextCharFormat();
         c.insertText(suffix, fmt);
     }
-
     cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
 }
 
-void tabsToSpaces(QTextEdit *editor) {
+void tabsToSpaces(BaseEditor *editor) {
     transformFragments(editor, [](const QString &t) {
         QString s = t;
-        return s.replace('\t', "    ");
+        return s.replace(QLatin1Char('\t'), QLatin1String("    "));
     });
 }
 
-void spacesToTabs(QTextEdit *editor) {
+void spacesToTabs(BaseEditor *editor) {
     transformFragments(editor, [](const QString &t) {
         QString s = t;
-        while (s.contains("    ")) {
-            s.replace("    ", "\t");
-        }
-        return s;
+        return s.replace(QLatin1String("    "), QLatin1String("\t"));
     });
 }
 

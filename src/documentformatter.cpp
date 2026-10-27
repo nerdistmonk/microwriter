@@ -227,27 +227,18 @@ void insertImage(EditorView *editor, QWidget *parent) {
         parent, "Insert Image", "",
         "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
         nullptr, QFileDialog::DontUseNativeDialog);
-        
+    
     if (!fileName.isEmpty()) {
         QImage image(fileName);
         if (!image.isNull()) {
-            // Determine relative path if the document already has a file path,
-            // otherwise use fileName or relative file name
-            QString imageRef = fileName;
-            if (!editor->filePath().isEmpty()) {
-                QDir docDir = QFileInfo(editor->filePath()).dir();
-                imageRef = docDir.relativeFilePath(fileName);
-            } else {
-                imageRef = QFileInfo(fileName).fileName();
-            }
+            QString cleanPath = QDir::cleanPath(fileName);
 
-            // Register the image with the document under imageRef
-            // so Qt can render it in the editor viewport
-            editor->document()->addResource(QTextDocument::ImageResource, QUrl(imageRef), image);
+            // Cache using the clean absolute path so Qt can render it in the viewport
+            editor->document()->addResource(QTextDocument::ImageResource, QUrl::fromLocalFile(cleanPath), image);
+            editor->document()->addResource(QTextDocument::ImageResource, QUrl(cleanPath), image);
 
-            // Insert via format pointing to that clean reference name
             QTextImageFormat format;
-            format.setName(imageRef);
+            format.setName(cleanPath);
             editor->textCursor().insertImage(format);
         }
     }

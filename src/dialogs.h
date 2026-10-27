@@ -7,6 +7,7 @@
 
 class QTextEdit;
 class EditorView;
+class BaseEditor;
 class QToolBar;
 class QAction;
 class QSpinBox;
@@ -70,7 +71,7 @@ private:
 class FindReplaceDialog : public QDialog {
     Q_OBJECT
 public:
-    explicit FindReplaceDialog(QTextEdit *ed, QWidget *parent = nullptr);
+    explicit FindReplaceDialog(BaseEditor *ed, QWidget *parent = nullptr);
     void setPattern(const QString &findText, const QString &replaceText, bool useRegex);
 
 private slots:
@@ -79,7 +80,7 @@ private slots:
     void replaceAll();
 
 private:
-    QTextEdit *editor;
+    BaseEditor *editor;
     QLineEdit *findInput;
     QLineEdit *replaceInput;
     QCheckBox *regexCheckBox;
@@ -95,6 +96,19 @@ private slots:
 
 private:
     EditorView *editor;
+    QTableWidget *tableWidget;
+};
+
+class HtmlHelpDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit HtmlHelpDialog(BaseEditor *ed, QWidget *parent = nullptr);
+
+private slots:
+    void applySelected();
+
+private:
+    BaseEditor *editor;
     QTableWidget *tableWidget;
 };
 

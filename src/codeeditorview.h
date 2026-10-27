@@ -7,12 +7,20 @@
 #include <QList>
 #include <QVector>
 #include <QColor>
+#include <QRegularExpression>
 #include "types.h"
 #include "baseeditor.h"
 
 class QPaintEvent;
 class QResizeEvent;
+class QMouseEvent;
+class QKeyEvent;
 class CodeEditorView;
+
+struct HighlightingRule {
+    QRegularExpression pattern;
+    QTextCharFormat format;
+};
 
 class BracketHighlighter : public QSyntaxHighlighter {
     Q_OBJECT
@@ -24,9 +32,16 @@ protected:
     void highlightBlock(const QString &text) override;
 
 private:
+    void setupRules();
+
     bool m_darkMode;
     QVector<QColor> m_colorsLight;
     QVector<QColor> m_colorsDark;
+
+    QList<HighlightingRule> m_highlightingRules;
+    QRegularExpression m_commentStartRegex;
+    QRegularExpression m_commentEndRegex;
+    QTextCharFormat m_multiLineCommentFormat;
 };
 
 class LineNumberArea : public QWidget {
@@ -37,6 +52,8 @@ public:
 
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 
 private:
     CodeEditorView *m_editor;
@@ -72,11 +89,23 @@ public:
     void redo() override { QPlainTextEdit::redo(); }
     void setDarkMode(bool dark) override;
 
+    bool findText(const QString &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) override {
+        return QPlainTextEdit::find(exp, options);
+    }
+    bool findRegExp(const QRegularExpression &exp, QTextDocument::FindFlags options = QTextDocument::FindFlags()) override {
+        return QPlainTextEdit::find(exp, options);
+    }
+    QTextCursor textCursor() const override { return QPlainTextEdit::textCursor(); }
+    void setTextCursor(const QTextCursor &cursor) override { QPlainTextEdit::setTextCursor(cursor); }
+    void moveCursor(QTextCursor::MoveOperation op) override { QPlainTextEdit::moveCursor(op); }
+
     void lineNumberAreaPaintEvent(QPaintEvent *event);
+    void lineNumberAreaSelectLine(int y);
     int lineNumberAreaWidth();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
     void updateLineNumberAreaWidth(int newBlockCount);
@@ -91,6 +120,14 @@ private:
     QWidget *m_lineNumberArea;
     BracketHighlighter *m_highlighter;
     bool m_darkMode;
+
+    void handleIndent();
+    void handleUnindent();
+    void handleReturn();
+    bool handleSmartBackspace();
+    void handleToggleComment();
+    void handleDuplicate();
+    void handleMoveLine(bool moveUp);
 
     void matchBrackets(QList<QTextEdit::ExtraSelection> &selections);
     bool isBracket(QChar c) const;
