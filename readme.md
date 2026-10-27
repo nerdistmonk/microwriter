@@ -2,12 +2,12 @@
 
 **The diet soda of word processors, same refreshing taste, half the calories!**
 
-**Version 1.2, released on October 27th, 2026**
+**Version 1.4, released on October 27th, 2026**
 
 **\**A lightweight, distraction-free rich text editor built with C++ and Qt.
 MicroWriter combines the simplicity of a classic notepad with essential word
 processing tools, multi-tab editing, and versatile document export capabilities.*
-\*<img src="shot.png" width="888" height="483" />**
+\*<img src="shot.png" width="875" height="477" />**
 
 - - -
 ## Features

@@ -11,6 +11,7 @@ set(CMAKE_AUTOMOC ON)
 add_executable(microwriter
     src/main.cpp
     src/editorview.cpp
+    src/codeeditorview.cpp
     src/ruler.cpp
     src/dialogs.cpp
     src/texttools.cpp
