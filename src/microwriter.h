@@ -3,19 +3,17 @@
 
 #include <QMainWindow>
 #include <QList>
-#include <QMap>
-#include <functional>
 #include "types.h"
 
 class EditorView;
 class Ruler;
+class ActionManager;
 class QTabWidget;
 class QLabel;
 class QToolBar;
 class QAction;
 class QCloseEvent;
 class QMenu;
-class QTextCharFormat;
 class QFontComboBox;
 class QSpinBox;
 
@@ -24,99 +22,50 @@ class MicroWriter : public QMainWindow {
 public:
     explicit MicroWriter(QWidget *parent = nullptr);
     void openFilePath(const QString &fileName);
+    EditorView* currentEditor() const;
 
-protected:
-    void closeEvent(QCloseEvent *event) override;
-    QMenu* createPopupMenu() override;
+    void updateFormatToolbarState();
+    void setDarkModeAction(QAction *act) { darkAct = act; }
 
-private slots:
-    void createNewToolbar();
+public slots:
     void newFile(const QString &title = "Untitled");
     void openFile();
     void saveFile();
     void saveAsFile();
     void closeTabRequested(int index);
 
-    void printDocument();
-    void printPreview();
-    void exportPdf();
-    void exportOdt();
-
-    void insertImage();
-    void insertBulletList();
-    void insertNumberedList();
-    void insertHorizontalLine();
-    void insertTable();
-    void insertDateTime();
-    void insertLink();
-    void insertSymbol();
-    void configureHeaderFooter();
-
-    void textShading();
-    void textStrikethrough();
-    void textSuperscript();
-    void textSubscript();
-    void insertBlockquote();
-    void toggleDoubleSpacing(bool doubleSpace);
-
-    void formatIndent();
-    void formatUnindent();
-    void formatStripBlankLines();
-
-    void toolsReverseLines();
-    void toolsSortLines();
-    void toolsUppercase();
-    void toolsLowercase();
-    void toolsTitleCase();
-    void toolsAddPrefix();
-    void toolsAddSuffix();
-    void toolsTabsToSpaces();
-    void toolsSpacesToTabs();
-
     void setLayoutMode(LayoutMode mode);
     void toggleDarkMode(bool dark);
-
-    void textBold();
-    void textItalic();
-    void textUnderline();
-    void textTextColor();
     void fontfamily(const QFont &font);
     void fontSize(int size);
 
-    void alignLeft();
-    void alignCenter();
-    void alignRight();
-    void alignJustify();
+    void createNewToolbar();
 
-    void showFindDialog();
-    void updateStats();
-    void updateWindowTitleAndStats();
-    void updateFormatToolbarState();
+protected:
+    void closeEvent(QCloseEvent *event) override;
+    QMenu* createPopupMenu() override;
 
 private:
-    void createMenus();
     void createDefaultToolBar();
     void createStatusBar();
     void saveToolbarSettings();
     void loadToolbarSettings();
     bool maybeSave(EditorView *editor);
-    EditorView* currentEditor();
     void writeFile(const QString &fileName);
-    void mergeFormatOnWordOrSelection(const QTextCharFormat &format);
-    void registerAction(QAction *act);
-    void modifySelectedLines(std::function<QStringList(QStringList)> transformer);
     void applyLayoutModeToEditor(EditorView *editor, LayoutMode mode);
+    void updateStats();
+    void updateWindowTitleAndStats();
 
     Ruler *ruler;
     QTabWidget *tabWidget;
     QLabel *statusLabel;
     QFontComboBox *fontCombo;
     QSpinBox *sizeSpin;
+    ActionManager *actionManager;
+
     LayoutMode currentLayoutMode;
     bool darkModeActive;
     QAction *darkAct;
-    QList<QAction*> allMenuActions;
-    QMap<QString, QAction*> actionMap;
     QList<QToolBar*> toolbars;
 };
 
