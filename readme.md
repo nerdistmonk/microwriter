@@ -4,13 +4,12 @@
 
 **Version 2.0, released on October 27th, 2026**
 
-***\*A lightweight, distraction-free rich text editor and code notepad built with
-C++ and Qt. MicroWriter combines the simplicity of a classic notepad with
+**\****A lightweight, distraction-free rich text editor and code notepad built
+with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with
 essential word processing tools, multi-tab editing, and versatile document
-export capabilities. ***
+export capabilities. *****
 
-<img src="shot.png" width="611" height="331" />
-<img src="shot2.png" width="616" height="334" />
+<img src="shot.png" width="621" height="338" /> <img src="shot2.png" width="623" height="340" />
 
 - - -
 ## Features
@@ -56,16 +55,16 @@ export capabilities. ***
 ### Editing & Navigation
 
 
-|Shortcut                   |Action          |
-|---------------------------|----------------|
-|`Ctrl + Z`                 |**Undo**        |
-|`Ctrl + Y`** / `Ctrl + Shift + Z`**|**Redo**        |
-|`Ctrl + X`                 |**Cut**         |
-|`Ctrl + C`                 |**Copy**        |
-|`Ctrl + V`                 |**Paste**       |
-|`Ctrl + A`                 |**Select all text**|
-|`Ctrl + F`                 |**Find and Replace**|
-|`Alt + Q`                  |**Next Tab**    |
+|Shortcut                       |Action          |
+|-------------------------------|----------------|
+|`Ctrl + Z`                     |**Undo**        |
+|`Ctrl + Y`**\** / `Ctrl + Shift + Z`\****|**Redo**        |
+|`Ctrl + X`                     |**Cut**         |
+|`Ctrl + C`                     |**Copy**        |
+|`Ctrl + V`                     |**Paste**       |
+|`Ctrl + A`                     |**Select all text**|
+|`Ctrl + F`                     |**Find and Replace**|
+|`Alt + Q`                      |**Next Tab**    |
 
 ### View & Layout Modes
 
