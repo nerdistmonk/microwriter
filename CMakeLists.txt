@@ -13,6 +13,10 @@ add_executable(microwriter
     src/editorview.cpp
     src/ruler.cpp
     src/dialogs.cpp
+    src/texttools.cpp
+    src/documentexporter.cpp
+    src/documentformatter.cpp
+    src/actionmanager.cpp
     src/microwriter.cpp
 )
 
