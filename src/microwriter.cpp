@@ -25,6 +25,10 @@
 #include <QSettings>
 #include <QStringConverter>
 #include <QRegularExpression>
+#include <QSignalBlocker>
+#include <QTextBlock>
+#include <QTextFragment>
+#include <QTextImageFormat>
 
 MicroWriter::MicroWriter(QWidget *parent)
     : QMainWindow(parent),
@@ -128,12 +132,7 @@ void MicroWriter::openFilePath(const QString &fileName) {
         }
     });
 
-    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) editor->setHtml(content);
-    else if (fileName.endsWith(".md")) editor->setMarkdown(content);
-    else editor->setPlainText(content);
-
     editor->filePath = fileName;
-    editor->document()->setModified(false);
 
     if (tabWidget->count() == 1) {
         EditorView *firstEd = qobject_cast<EditorView*>(tabWidget->widget(0));
@@ -147,6 +146,12 @@ void MicroWriter::openFilePath(const QString &fileName) {
     tabWidget->setCurrentIndex(index);
     ruler->setEditor(editor);
     applyLayoutModeToEditor(editor, currentLayoutMode);
+
+    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) editor->setHtml(content);
+    else if (fileName.endsWith(".md")) editor->setMarkdown(content);
+    else editor->setPlainText(content);
+
+    editor->document()->setModified(false);
     updateFormatToolbarState();
 }
 
@@ -175,7 +180,14 @@ void MicroWriter::newFile(const QString &title) {
 }
 
 void MicroWriter::openFile() {
-    QString fileName = QFileDialog::getOpenFileName(this, "Open Document", "", "Documents (*.html *.htm *.md *.txt);;All Files (*.*)", nullptr, QFileDialog::DontUseNativeDialog);
+    QString fileName = QFileDialog::getOpenFileName(
+        this, 
+        "Open Document", 
+        "", 
+        "Documents (*.html *.htm *.md *.txt);;All Files (*.*)", 
+        nullptr, 
+        QFileDialog::DontUseNativeDialog
+    );
     if (!fileName.isEmpty()) openFilePath(fileName);
 }
 
@@ -222,11 +234,32 @@ void MicroWriter::writeFile(const QString &fileName) {
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
 
     QString content;
-    if (fileName.endsWith(".md")) content = editor->toMarkdown();
-    else if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
+    if (fileName.endsWith(".md")) {
+        content = editor->toMarkdown();
+
+        // Convert sized images to HTML <img> tags to preserve dimensions in Markdown
+        for (QTextBlock blk = editor->document()->begin(); blk.isValid(); blk = blk.next()) {
+            for (QTextBlock::iterator it = blk.begin(); !it.atEnd(); ++it) {
+                QTextFragment frag = it.fragment();
+                if (frag.isValid() && frag.charFormat().isImageFormat()) {
+                    QTextImageFormat ifmt = frag.charFormat().toImageFormat();
+                    if (ifmt.width() > 0 && ifmt.height() > 0) {
+                        QString target = QString("![image](%1)").arg(ifmt.name());
+                        QString replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
+                                              .arg(ifmt.name())
+                                              .arg((int)ifmt.width())
+                                              .arg((int)ifmt.height());
+                        content.replace(target, replacement);
+                    }
+                }
+            }
+        }
+    } else if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
         content = editor->toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
-    } else content = editor->toPlainText();
+    } else {
+        content = editor->toPlainText();
+    }
 
     content.replace(QRegularExpression("\\r\\n|\\r"), "\n");
     if (editor->eolFormat == EolCrlf) content.replace('\n', "\r\n");
@@ -330,7 +363,7 @@ void MicroWriter::updateStats() {
     int words = text.trimmed().isEmpty() ? 0 : text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).count();
     QTextCursor cursor = editor->textCursor();
 
-    const char *eol = (editor->eolFormat == EolCrlf) ? "CRLF" : (editor->eolFormat == EolCr ? "CR" : "LF");
+    const char *eol = (editor->eolFormat == EolCrlf) ? "CRLF" : (editor->eolFormat == EolCr) ? "CR" : "LF";
     statusLabel->setText(QString("Line: %1, Col: %2 | Words: %3 | Chars: %4 | Enc: %5 | EOL: %6")
         .arg(cursor.blockNumber() + 1).arg(cursor.columnNumber() + 1).arg(words).arg(text.length()).arg(editor->encodingName).arg(eol));
 }
@@ -341,16 +374,14 @@ void MicroWriter::updateFormatToolbarState() {
 
     QTextCharFormat fmt = editor->currentCharFormat();
     if (fontCombo) {
-        fontCombo->blockSignals(true);
+        QSignalBlocker blocker(fontCombo);
         QStringList fams = fmt.fontFamilies().toStringList();
         fontCombo->setCurrentFont(fams.isEmpty() ? fmt.font() : QFont(fams.first()));
-        fontCombo->blockSignals(false);
     }
     if (sizeSpin) {
-        sizeSpin->blockSignals(true);
+        QSignalBlocker blocker(sizeSpin);
         int pt = qRound(fmt.fontPointSize() > 0 ? fmt.fontPointSize() : fmt.font().pointSize());
         if (pt > 0) sizeSpin->setValue(pt);
-        sizeSpin->blockSignals(false);
     }
 }
 

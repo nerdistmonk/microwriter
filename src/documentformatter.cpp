@@ -11,6 +11,9 @@
 #include <QFileDialog>
 #include <QDateTime>
 #include <QImage>
+#include <QFileInfo>
+#include <QDir>
+#include <QUrl>
 
 namespace DocumentFormatter {
 
@@ -221,11 +224,32 @@ void insertSymbol(EditorView *editor, QWidget *parent) {
 
 void insertImage(EditorView *editor, QWidget *parent) {
     if (!editor) return;
-    QString fileName = QFileDialog::getOpenFileName(parent, "Insert Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)", nullptr, QFileDialog::DontUseNativeDialog);
+    QString fileName = QFileDialog::getOpenFileName(
+        parent, "Insert Image", "",
+        "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+        nullptr, QFileDialog::DontUseNativeDialog);
+        
     if (!fileName.isEmpty()) {
         QImage image(fileName);
         if (!image.isNull()) {
-            editor->textCursor().insertImage(image);
+            // Determine relative path if the document already has a file path,
+            // otherwise use fileName or relative file name
+            QString imageRef = fileName;
+            if (!editor->filePath.isEmpty()) {
+                QDir docDir = QFileInfo(editor->filePath).dir();
+                imageRef = docDir.relativeFilePath(fileName);
+            } else {
+                imageRef = QFileInfo(fileName).fileName();
+            }
+
+            // Register the image with the document under imageRef
+            // so Qt can render it in the editor viewport
+            editor->document()->addResource(QTextDocument::ImageResource, QUrl(imageRef), image);
+
+            // Insert via format pointing to that clean reference name
+            QTextImageFormat format;
+            format.setName(imageRef);
+            editor->textCursor().insertImage(format);
         }
     }
 }

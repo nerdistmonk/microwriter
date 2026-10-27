@@ -4,10 +4,12 @@
 #include <QTextEdit>
 #include <QString>
 #include <QStringList>
+#include <QRect>
 #include "types.h"
 
 class QPaintEvent;
 class QContextMenuEvent;
+class QMouseEvent;
 
 class EditorView : public QTextEdit {
     Q_OBJECT
@@ -33,12 +35,25 @@ public:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private:
     QString m_headerText;
     QString m_footerText;
 
     QStringList getAspellSuggestions(const QString &word);
+
+    // Corner dragging state
+    int m_selectedImagePos;
+    bool m_isResizingImage;
+    int m_dragWidth;
+    int m_dragHeight;
+    double m_imageAspectRatio;
+
+    QRect currentImageRect() const;
+    QRect cornerHandleRect() const;
 };
 
 #endif // EDITORVIEW_H
