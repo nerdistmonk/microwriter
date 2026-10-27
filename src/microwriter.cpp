@@ -1,5 +1,6 @@
 #include "microwriter.h"
 #include "editorview.h"
+#include "codeeditorview.h"
 #include "ruler.h"
 #include "dialogs.h"
 #include "documentformatter.h"
@@ -26,9 +27,6 @@
 #include <QStringConverter>
 #include <QRegularExpression>
 #include <QSignalBlocker>
-#include <QTextBlock>
-#include <QTextFragment>
-#include <QTextImageFormat>
 
 MicroWriter::MicroWriter(QWidget *parent)
     : QMainWindow(parent),
@@ -59,16 +57,22 @@ MicroWriter::MicroWriter(QWidget *parent)
 
     connect(tabWidget, &QTabWidget::tabCloseRequested, this, &MicroWriter::closeTabRequested);
     connect(tabWidget, &QTabWidget::currentChanged, this, [=](int index){
+        Q_UNUSED(index);
         updateWindowTitleAndStats();
-        EditorView *ed = qobject_cast<EditorView*>(tabWidget->widget(index));
-        ruler->setEditor(ed);
-        applyLayoutModeToEditor(ed, currentLayoutMode);
-        if (ed) {
-            disconnect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
-            disconnect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateFormatToolbarState);
-            connect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
-            connect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateFormatToolbarState);
+        BaseEditor *base = currentBaseEditor();
+        if (!base) return;
+
+        bool isRich = base->supportsRichFormatting();
+        if (fontCombo) fontCombo->setEnabled(isRich);
+        if (sizeSpin) sizeSpin->setEnabled(isRich);
+
+        if (isRich) {
+            EditorView *ed = dynamic_cast<EditorView*>(base);
+            ruler->setEditor(ed);
+            applyLayoutModeToEditor(ed, currentLayoutMode);
             updateFormatToolbarState();
+        } else {
+            ruler->setVisible(false);
         }
     });
 
@@ -88,8 +92,14 @@ MicroWriter::MicroWriter(QWidget *parent)
     }
 }
 
+BaseEditor* MicroWriter::currentBaseEditor() const {
+    QWidget *w = tabWidget->currentWidget();
+    return dynamic_cast<BaseEditor*>(w);
+}
+
 EditorView* MicroWriter::currentEditor() const {
-    return qobject_cast<EditorView*>(tabWidget->currentWidget());
+    QWidget *w = tabWidget->currentWidget();
+    return dynamic_cast<EditorView*>(w);
 }
 
 void MicroWriter::fontfamily(const QFont &font) {
@@ -102,81 +112,138 @@ void MicroWriter::fontSize(int size) {
     updateFormatToolbarState();
 }
 
+void MicroWriter::attachEditorSignals(BaseEditor *editor) {
+    QWidget *w = editor->asWidget();
+
+    auto updateTabTitle = [=](bool changed) {
+        int idx = tabWidget->indexOf(w);
+        if (idx != -1) {
+            QString name = editor->filePath().isEmpty() ? "Untitled" : QFileInfo(editor->filePath()).fileName();
+            if (changed) {
+                name += " *";
+            }
+            tabWidget->setTabText(idx, name);
+        }
+    };
+
+    if (EditorView *ed = dynamic_cast<EditorView*>(editor)) {
+        connect(ed, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
+        connect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
+        connect(ed, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateFormatToolbarState);
+        connect(ed->document(), &QTextDocument::modificationChanged, this, updateTabTitle);
+    } else if (CodeEditorView *ce = dynamic_cast<CodeEditorView*>(editor)) {
+        connect(ce, &QPlainTextEdit::textChanged, this, &MicroWriter::updateStats);
+        connect(ce, &QPlainTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
+        connect(ce->document(), &QTextDocument::modificationChanged, this, updateTabTitle);
+    }
+}
+
 void MicroWriter::openFilePath(const QString &fileName) {
     if (fileName.isEmpty()) return;
 
     QFile file(fileName);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return;
 
-    EditorView *editor = new EditorView(this);
     QByteArray rawData = file.readAll();
-    if (rawData.contains("\r\n")) editor->eolFormat = EolCrlf;
-    else if (rawData.contains('\r') && !rawData.contains('\n')) editor->eolFormat = EolCr;
-    else editor->eolFormat = EolLf;
+    EolFormat eol = EolLf;
+    if (rawData.contains("\r\n")) eol = EolCrlf;
+    else if (rawData.contains('\r') && !rawData.contains('\n')) eol = EolCr;
 
+    QString encName = "UTF-8";
     QTextStream in(&rawData);
-    in.setEncoding(QStringConverter::encodingForName(editor->encodingName.toUtf8()).value_or(QStringConverter::Utf8));
+    in.setEncoding(QStringConverter::encodingForName(encName.toUtf8()).value_or(QStringConverter::Utf8));
     QString content = in.readAll();
 
-    connect(editor, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
-    connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
-    connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateFormatToolbarState);
+    BaseEditor *newBase = nullptr;
+    QWidget *newWidget = nullptr;
 
-    connect(editor->document(), &QTextDocument::modificationChanged, this, [=](bool changed){
-        int idx = tabWidget->indexOf(editor);
-        if (idx != -1) {
-            QFileInfo fi(editor->filePath);
-            QString name = editor->filePath.isEmpty() ? "Untitled" : fi.fileName();
-            if (changed) name += " *";
-            tabWidget->setTabText(idx, name);
-        }
-    });
+    if (currentLayoutMode == CodeLayout) {
+        CodeEditorView *codeEd = new CodeEditorView(this);
+        codeEd->setFilePath(fileName);
+        codeEd->setEncodingName(encName);
+        codeEd->setEolFormat(eol);
+        codeEd->setContent(content, fileName);
+        codeEd->setDarkMode(darkModeActive);
 
-    editor->filePath = fileName;
+        newBase = codeEd;
+        newWidget = codeEd;
+        ruler->setVisible(false);
+        if (fontCombo) fontCombo->setEnabled(false);
+        if (sizeSpin) sizeSpin->setEnabled(false);
+    } else {
+        EditorView *editor = new EditorView(this);
+        editor->setFilePath(fileName);
+        editor->setEncodingName(encName);
+        editor->setEolFormat(eol);
+        editor->setContent(content, fileName);
+        applyLayoutModeToEditor(editor, currentLayoutMode);
 
+        newBase = editor;
+        newWidget = editor;
+        ruler->setEditor(editor);
+        if (fontCombo) fontCombo->setEnabled(true);
+        if (sizeSpin) sizeSpin->setEnabled(true);
+    }
+
+    attachEditorSignals(newBase);
+
+    // If there is only one tab and it's an untouched blank file, replace it
     if (tabWidget->count() == 1) {
-        EditorView *firstEd = qobject_cast<EditorView*>(tabWidget->widget(0));
-        if (firstEd && firstEd->filePath.isEmpty() && !firstEd->document()->isModified() && firstEd->toPlainText().isEmpty()) {
+        BaseEditor *firstEd = dynamic_cast<BaseEditor*>(tabWidget->widget(0));
+        if (firstEd && firstEd->filePath().isEmpty() && firstEd->getRawPlainText().trimmed().isEmpty()) {
             tabWidget->removeTab(0);
-            delete firstEd;
+            delete firstEd->asWidget();
         }
     }
 
-    int index = tabWidget->addTab(editor, QFileInfo(fileName).fileName());
+    int index = tabWidget->addTab(newWidget, QFileInfo(fileName).fileName());
     tabWidget->setCurrentIndex(index);
-    ruler->setEditor(editor);
-    applyLayoutModeToEditor(editor, currentLayoutMode);
+    updateWindowTitleAndStats();
+    if (currentLayoutMode != CodeLayout) {
+        updateFormatToolbarState();
+    }
 
-    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) editor->setHtml(content);
-    else if (fileName.endsWith(".md")) editor->setMarkdown(content);
-    else editor->setPlainText(content);
-
-    editor->document()->setModified(false);
-    updateFormatToolbarState();
+    // Ensure newly opened document begins in a clean, unmodified state
+    newBase->setModified(false);
+    tabWidget->setTabText(index, QFileInfo(fileName).fileName());
 }
 
 void MicroWriter::newFile(const QString &title) {
-    EditorView *editor = new EditorView(this);
-    connect(editor, &QTextEdit::textChanged, this, &MicroWriter::updateStats);
-    connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateStats);
-    connect(editor, &QTextEdit::cursorPositionChanged, this, &MicroWriter::updateFormatToolbarState);
+    BaseEditor *newBase = nullptr;
+    QWidget *newWidget = nullptr;
 
-    connect(editor->document(), &QTextDocument::modificationChanged, this, [=](bool changed){
-        int idx = tabWidget->indexOf(editor);
-        if (idx != -1) {
-            QFileInfo fi(editor->filePath);
-            QString name = editor->filePath.isEmpty() ? "Untitled" : fi.fileName();
-            if (changed) name += " *";
-            tabWidget->setTabText(idx, name);
-        }
-    });
+    if (currentLayoutMode == CodeLayout) {
+        CodeEditorView *codeEd = new CodeEditorView(this);
+        codeEd->setDarkMode(darkModeActive);
+        newBase = codeEd;
+        newWidget = codeEd;
 
-    int index = tabWidget->addTab(editor, title);
+        ruler->setVisible(false);
+        if (fontCombo) fontCombo->setEnabled(false);
+        if (sizeSpin) sizeSpin->setEnabled(false);
+    } else {
+        EditorView *editor = new EditorView(this);
+        applyLayoutModeToEditor(editor, currentLayoutMode);
+        newBase = editor;
+        newWidget = editor;
+
+        ruler->setEditor(editor);
+        if (fontCombo) fontCombo->setEnabled(true);
+        if (sizeSpin) sizeSpin->setEnabled(true);
+    }
+
+    attachEditorSignals(newBase);
+
+    int index = tabWidget->addTab(newWidget, title);
     tabWidget->setCurrentIndex(index);
-    ruler->setEditor(editor);
-    applyLayoutModeToEditor(editor, currentLayoutMode);
-    updateStats();
-    updateFormatToolbarState();
+    updateWindowTitleAndStats();
+    if (currentLayoutMode != CodeLayout) {
+        updateFormatToolbarState();
+    }
+
+    // Ensure newly created document begins in a clean, unmodified state
+    newBase->setModified(false);
+    tabWidget->setTabText(index, title);
 }
 
 void MicroWriter::openFile() {
@@ -192,17 +259,18 @@ void MicroWriter::openFile() {
 }
 
 void MicroWriter::saveFile() {
-    EditorView *editor = currentEditor();
+    BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
-    if (editor->filePath.isEmpty()) saveAsFile();
-    else writeFile(editor->filePath);
+
+    if (editor->filePath().isEmpty()) saveAsFile();
+    else writeFile(editor->filePath());
 }
 
 void MicroWriter::saveAsFile() {
-    EditorView *editor = currentEditor();
+    BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
 
-    QString defaultPath = editor->filePath.isEmpty() ? "untitled.html" : editor->filePath;
+    QString defaultPath = editor->filePath().isEmpty() ? "untitled.html" : editor->filePath();
     QFileDialog dialog(this, "Save Document As", defaultPath);
     dialog.setOption(QFileDialog::DontUseNativeDialog, true);
     dialog.setAcceptMode(QFileDialog::AcceptSave);
@@ -219,118 +287,203 @@ void MicroWriter::saveAsFile() {
             else fileName += ".html";
         }
 
-        editor->filePath = fileName;
-        writeFile(editor->filePath);
+        editor->setFilePath(fileName);
+        writeFile(fileName);
         tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
         updateWindowTitleAndStats();
     }
 }
 
 void MicroWriter::writeFile(const QString &fileName) {
-    EditorView *editor = currentEditor();
+    BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
 
     QFile file(fileName);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) return;
 
-    QString content;
-    if (fileName.endsWith(".md")) {
-        content = editor->toMarkdown();
-
-        // Convert sized images to HTML <img> tags to preserve dimensions in Markdown
-        for (QTextBlock blk = editor->document()->begin(); blk.isValid(); blk = blk.next()) {
-            for (QTextBlock::iterator it = blk.begin(); !it.atEnd(); ++it) {
-                QTextFragment frag = it.fragment();
-                if (frag.isValid() && frag.charFormat().isImageFormat()) {
-                    QTextImageFormat ifmt = frag.charFormat().toImageFormat();
-                    if (ifmt.width() > 0 && ifmt.height() > 0) {
-                        QString target = QString("![image](%1)").arg(ifmt.name());
-                        QString replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
-                                              .arg(ifmt.name())
-                                              .arg((int)ifmt.width())
-                                              .arg((int)ifmt.height());
-                        content.replace(target, replacement);
-                    }
-                }
-            }
-        }
-    } else if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
-        content = editor->toHtml();
-        content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
-    } else {
-        content = editor->toPlainText();
-    }
+    QString content = editor->getContentForSave();
 
     content.replace(QRegularExpression("\\r\\n|\\r"), "\n");
-    if (editor->eolFormat == EolCrlf) content.replace('\n', "\r\n");
-    else if (editor->eolFormat == EolCr) content.replace('\n', "\r");
+    if (editor->eolFormat() == EolCrlf) content.replace('\n', "\r\n");
+    else if (editor->eolFormat() == EolCr) content.replace('\n', "\r");
 
     QTextStream out(&file);
-    out.setEncoding(QStringConverter::encodingForName(editor->encodingName.toUtf8()).value_or(QStringConverter::Utf8));
+    out.setEncoding(QStringConverter::encodingForName(editor->encodingName().toUtf8()).value_or(QStringConverter::Utf8));
     out << content;
-    editor->document()->setModified(false);
+    editor->setModified(false);
 }
 
 void MicroWriter::closeTabRequested(int index) {
-    EditorView *editor = qobject_cast<EditorView*>(tabWidget->widget(index));
-    if (editor && maybeSave(editor)) {
+    if (maybeSaveTab(index)) {
+        QWidget *w = tabWidget->widget(index);
         tabWidget->removeTab(index);
-        delete editor;
+        delete w;
         if (tabWidget->count() == 0) newFile();
     }
 }
 
-bool MicroWriter::maybeSave(EditorView *editor) {
-    if (!editor || !editor->document()->isModified()) return true;
+bool MicroWriter::maybeSaveTab(int index) {
+    QWidget *w = tabWidget->widget(index);
+    BaseEditor *editor = dynamic_cast<BaseEditor*>(w);
+    if (!editor || !editor->isModified()) return true;
 
-    QString name = editor->filePath.isEmpty() ? "Untitled" : QFileInfo(editor->filePath).fileName();
+    if (editor->filePath().isEmpty() && editor->getRawPlainText().trimmed().isEmpty()) {
+        return true;
+    }
+
+    QString name = editor->filePath().isEmpty() ? "Untitled" : QFileInfo(editor->filePath()).fileName();
     QMessageBox::StandardButton ret = QMessageBox::warning(this, "MicroWriter",
         tr("The document '%1' has been modified.\nDo you want to save your changes?").arg(name),
         QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel);
 
     if (ret == QMessageBox::Save) {
-        tabWidget->setCurrentWidget(editor);
+        tabWidget->setCurrentIndex(index);
         saveFile();
-        return !editor->document()->isModified();
+        return !editor->isModified();
     }
     return ret != QMessageBox::Cancel;
 }
 
 void MicroWriter::setLayoutMode(LayoutMode mode) {
     currentLayoutMode = mode;
-    for (int i = 0; i < tabWidget->count(); ++i) {
-        applyLayoutModeToEditor(qobject_cast<EditorView*>(tabWidget->widget(i)), mode);
+    int curIdx = tabWidget->currentIndex();
+    if (curIdx == -1) return;
+
+    BaseEditor *curBase = currentBaseEditor();
+    if (!curBase) return;
+
+    if (mode == CodeLayout) {
+        if (curBase->supportsRichFormatting()) {
+            QString rawContent = curBase->getContentForSave();
+            QString fPath = curBase->filePath();
+            QString enc = curBase->encodingName();
+            EolFormat eol = curBase->eolFormat();
+            bool modified = curBase->isModified();
+            QString tabTitle = tabWidget->tabText(curIdx);
+
+            CodeEditorView *codeEd = new CodeEditorView(this);
+            codeEd->setFilePath(fPath);
+            codeEd->setEncodingName(enc);
+            codeEd->setEolFormat(eol);
+            codeEd->setContent(rawContent, fPath);
+            codeEd->setModified(modified);
+            codeEd->setDarkMode(darkModeActive);
+
+            attachEditorSignals(codeEd);
+
+            tabWidget->removeTab(curIdx);
+            delete curBase->asWidget();
+
+            tabWidget->insertTab(curIdx, codeEd, tabTitle);
+            tabWidget->setCurrentIndex(curIdx);
+
+            ruler->setVisible(false);
+            if (fontCombo) fontCombo->setEnabled(false);
+            if (sizeSpin) sizeSpin->setEnabled(false);
+            updateWindowTitleAndStats();
+        }
+    } else {
+        if (!curBase->supportsRichFormatting()) {
+            QString rawContent = curBase->getRawPlainText();
+            QString fPath = curBase->filePath();
+            QString enc = curBase->encodingName();
+            EolFormat eol = curBase->eolFormat();
+            bool modified = curBase->isModified();
+            QString tabTitle = tabWidget->tabText(curIdx);
+
+            EditorView *editor = new EditorView(this);
+            editor->setFilePath(fPath);
+            editor->setEncodingName(enc);
+            editor->setEolFormat(eol);
+
+            attachEditorSignals(editor);
+
+            tabWidget->removeTab(curIdx);
+            delete curBase->asWidget();
+
+            tabWidget->insertTab(curIdx, editor, tabTitle);
+            tabWidget->setCurrentIndex(curIdx);
+
+            ruler->setEditor(editor);
+            applyLayoutModeToEditor(editor, mode);
+            editor->setContent(rawContent, fPath);
+            editor->setModified(modified);
+
+            if (fontCombo) fontCombo->setEnabled(true);
+            if (sizeSpin) sizeSpin->setEnabled(true);
+            updateWindowTitleAndStats();
+            updateFormatToolbarState();
+        } else {
+            if (EditorView *ed = dynamic_cast<EditorView*>(curBase)) {
+                applyLayoutModeToEditor(ed, mode);
+            }
+        }
     }
 }
 
 void MicroWriter::applyLayoutModeToEditor(EditorView *editor, LayoutMode mode) {
     if (!editor) return;
     QTextDocument *doc = editor->document();
+    bool wasModified = doc->isModified();
+
+    // Prevent frame formatting and layout invalidation from dirtying the document modification flag
+    bool docSignalsBlocked = doc->blockSignals(true);
+
     QString bg = darkModeActive ? "#1e1e1e" : "#ffffff";
     QString textCol = darkModeActive ? "#dcdcdc" : "#000000";
+
+    QTextFrameFormat frameFmt = doc->rootFrame()->frameFormat();
 
     switch (mode) {
     case NormalLayout:
         editor->isPrintLayout = false;
         ruler->setVisible(true);
-        editor->setStyleSheet(QString("QTextEdit { background-color: %1; color: %2; padding: 15px; }").arg(bg, textCol));
-        doc->setPageSize(QSizeF());
+        editor->setStyleSheet(QString("EditorView { background-color: %1; color: %2; }").arg(bg, textCol));
+        frameFmt.setTopMargin(15);
+        frameFmt.setBottomMargin(15);
+        frameFmt.setRightMargin(20);
+        frameFmt.setLeftMargin(editor->leftMarginPixels());
+        doc->rootFrame()->setFrameFormat(frameFmt);
+        doc->setPageSize(QSizeF(-1, -1));
+        doc->setTextWidth(editor->viewport()->width());
         break;
+
     case WebLayout:
         editor->isPrintLayout = false;
         ruler->setVisible(false);
-        editor->setStyleSheet(QString("QTextEdit { background-color: %1; color: %2; padding: 30px; }").arg(bg, textCol));
-        doc->setPageSize(QSizeF());
+        editor->setStyleSheet(QString("EditorView { background-color: %1; color: %2; }").arg(bg, textCol));
+        frameFmt.setTopMargin(30);
+        frameFmt.setBottomMargin(30);
+        frameFmt.setLeftMargin(30);
+        frameFmt.setRightMargin(30);
+        doc->rootFrame()->setFrameFormat(frameFmt);
+        doc->setPageSize(QSizeF(-1, -1));
+        doc->setTextWidth(editor->viewport()->width());
         break;
+
     case PrintLayout:
         editor->isPrintLayout = true;
         ruler->setVisible(true);
-        editor->setStyleSheet(QString("EditorView { background-color: %1; padding: 30px; } EditorView QTextEdit { background-color: %2; color: %3; border: 1px solid #404040; }")
-            .arg(darkModeActive ? "#121212" : "#707070", darkModeActive ? "#2b2b2b" : "#ffffff", textCol));
+        editor->setStyleSheet(QString("EditorView { background-color: %1; }")
+            .arg(darkModeActive ? "#121212" : "#707070"));
+        frameFmt.setTopMargin(40);
+        frameFmt.setBottomMargin(40);
+        frameFmt.setLeftMargin(editor->leftMarginPixels() > 0 ? editor->leftMarginPixels() : 40);
+        frameFmt.setRightMargin(40);
+        doc->rootFrame()->setFrameFormat(frameFmt);
         doc->setPageSize(QSizeF(816, 1056));
+        doc->setTextWidth(816);
+        break;
+
+    case CodeLayout:
         break;
     }
+
+    doc->markContentsDirty(0, doc->characterCount());
     editor->viewport()->update();
+
+    doc->setModified(wasModified);
+    doc->blockSignals(docSignalsBlocked);
 }
 
 void MicroWriter::toggleDarkMode(bool dark) {
@@ -352,20 +505,27 @@ void MicroWriter::toggleDarkMode(bool dark) {
     } else {
         qApp->setStyleSheet("");
     }
-    setLayoutMode(currentLayoutMode);
+
+    for (int i = 0; i < tabWidget->count(); ++i) {
+        BaseEditor *ed = dynamic_cast<BaseEditor*>(tabWidget->widget(i));
+        if (ed) {
+            ed->setDarkMode(dark);
+            if (EditorView *richEd = dynamic_cast<EditorView*>(ed)) {
+                applyLayoutModeToEditor(richEd, currentLayoutMode);
+            }
+        }
+    }
 }
 
 void MicroWriter::updateStats() {
-    EditorView *editor = currentEditor();
+    BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
 
-    QString text = editor->toPlainText();
-    int words = text.trimmed().isEmpty() ? 0 : text.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).count();
-    QTextCursor cursor = editor->textCursor();
+    EditorStats s = editor->getStats();
+    const char *eolStr = (s.eol == EolCrlf) ? "CRLF" : (s.eol == EolCr) ? "CR" : "LF";
 
-    const char *eol = (editor->eolFormat == EolCrlf) ? "CRLF" : (editor->eolFormat == EolCr) ? "CR" : "LF";
     statusLabel->setText(QString("Line: %1, Col: %2 | Words: %3 | Chars: %4 | Enc: %5 | EOL: %6")
-        .arg(cursor.blockNumber() + 1).arg(cursor.columnNumber() + 1).arg(words).arg(text.length()).arg(editor->encodingName).arg(eol));
+        .arg(s.line).arg(s.column).arg(s.words).arg(s.characters).arg(s.encoding).arg(eolStr));
 }
 
 void MicroWriter::updateFormatToolbarState() {
@@ -386,9 +546,11 @@ void MicroWriter::updateFormatToolbarState() {
 }
 
 void MicroWriter::updateWindowTitleAndStats() {
-    EditorView *editor = currentEditor();
+    BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
-    setWindowTitle(editor->filePath.isEmpty() ? "Qt6 MicroWriter - New File" : "Qt6 MicroWriter - " + editor->filePath);
+
+    QString fPath = editor->filePath();
+    setWindowTitle(fPath.isEmpty() ? "Qt6 MicroWriter - New File" : "Qt6 MicroWriter - " + fPath);
     updateStats();
 }
 
@@ -456,7 +618,7 @@ void MicroWriter::loadToolbarSettings() {
         tb->setWindowTitle(name);
         toolbars.append(tb);
 
-        if (i == 0) {
+        if (name == "Toolbar 1") {
             fontCombo = new QFontComboBox(this);
             connect(fontCombo, &QFontComboBox::currentFontChanged, this, &MicroWriter::fontfamily);
             tb->addWidget(fontCombo);
@@ -466,7 +628,6 @@ void MicroWriter::loadToolbarSettings() {
             sizeSpin->setValue(12);
             connect(sizeSpin, QOverload<int>::of(&QSpinBox::valueChanged), this, &MicroWriter::fontSize);
             tb->addWidget(sizeSpin);
-
             tb->addSeparator();
         }
 
@@ -475,15 +636,22 @@ void MicroWriter::loadToolbarSettings() {
         }
     }
     settings.endArray();
+}
 
-    if (settings.contains("geometry")) restoreGeometry(settings.value("geometry").toByteArray());
-    if (settings.contains("windowState")) restoreState(settings.value("windowState").toByteArray());
+void MicroWriter::createNewToolbar() {
+    bool ok;
+    QString name = QInputDialog::getText(this, tr("New Toolbar"), tr("Toolbar Name:"), QLineEdit::Normal, "", &ok);
+    if (!ok || name.trimmed().isEmpty()) return;
+
+    QToolBar *tb = addToolBar(name);
+    tb->setObjectName(name);
+    tb->setWindowTitle(name);
+    toolbars.append(tb);
 }
 
 void MicroWriter::closeEvent(QCloseEvent *event) {
     for (int i = 0; i < tabWidget->count(); ++i) {
-        EditorView *ed = qobject_cast<EditorView*>(tabWidget->widget(i));
-        if (ed && !maybeSave(ed)) {
+        if (!maybeSaveTab(i)) {
             event->ignore();
             return;
         }
@@ -495,36 +663,7 @@ void MicroWriter::closeEvent(QCloseEvent *event) {
 QMenu* MicroWriter::createPopupMenu() {
     QMenu *menu = new QMenu(this);
     for (QToolBar *tb : toolbars) {
-        QAction *toggleAct = tb->toggleViewAction();
-        toggleAct->setText(tb->windowTitle());
-        menu->addAction(toggleAct);
-
-        QAction *customAct = menu->addAction(tr("Customize %1...").arg(tb->windowTitle()));
-        connect(customAct, &QAction::triggered, this, [=](){
-            ToolbarCustomizeDialog dlg(tb, actionManager->allActions(), this);
-            dlg.exec();
-            saveToolbarSettings();
-        });
-        menu->addSeparator();
+        menu->addAction(tb->toggleViewAction());
     }
-
-    QAction *newTbAct = menu->addAction(tr("Create New Toolbar..."));
-    connect(newTbAct, &QAction::triggered, this, &MicroWriter::createNewToolbar);
     return menu;
-}
-
-void MicroWriter::createNewToolbar() {
-    bool ok;
-    QString name = QInputDialog::getText(this, tr("Create New Toolbar"), tr("Toolbar Name:"),
-        QLineEdit::Normal, QString("Toolbar %1").arg(toolbars.size() + 1), &ok);
-    if (ok && !name.trimmed().isEmpty()) {
-        QToolBar *tb = addToolBar(name.trimmed());
-        tb->setObjectName(name.trimmed());
-        tb->setWindowTitle(name.trimmed());
-        toolbars.append(tb);
-
-        ToolbarCustomizeDialog dlg(tb, actionManager->allActions(), this);
-        dlg.exec();
-        saveToolbarSettings();
-    }
 }

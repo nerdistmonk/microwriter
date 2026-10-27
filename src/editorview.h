@@ -5,22 +5,48 @@
 #include <QString>
 #include <QStringList>
 #include <QRect>
+#include <QKeyEvent>
+#include <QUrl>
+#include <QVariant>
 #include "types.h"
+#include "baseeditor.h"
 
 class QPaintEvent;
 class QContextMenuEvent;
 class QMouseEvent;
 
-class EditorView : public QTextEdit {
+class EditorView : public QTextEdit, public BaseEditor {
     Q_OBJECT
 public:
     explicit EditorView(QWidget *parent = nullptr);
 
-    QString filePath;
-    bool isPrintLayout;
-    QString encodingName;
-    EolFormat eolFormat;
+    // BaseEditor implementation
+    QWidget* asWidget() override { return this; }
+    QString filePath() const override { return m_filePath; }
+    void setFilePath(const QString &path) override { m_filePath = path; }
 
+    QString encodingName() const override { return m_encodingName; }
+    void setEncodingName(const QString &encoding) override { m_encodingName = encoding; }
+
+    EolFormat eolFormat() const override { return m_eolFormat; }
+    void setEolFormat(EolFormat format) override { m_eolFormat = format; }
+
+    bool isModified() const override { return document()->isModified(); }
+    void setModified(bool modified) override { document()->setModified(modified); }
+
+    QString getContentForSave() override;
+    void setContent(const QString &content, const QString &fileName) override;
+    QString getRawPlainText() const override { return toPlainText(); }
+
+    EditorStats getStats() const override;
+    bool supportsRichFormatting() const override { return true; }
+
+    void undo() override { QTextEdit::undo(); }
+    void redo() override { QTextEdit::redo(); }
+    void setDarkMode(bool dark) override;
+
+    // View layout & margins
+    bool isPrintLayout;
     QString headerText() const { return m_headerText; }
     void setHeaderText(const QString &text) { m_headerText = text; }
 
@@ -38,8 +64,14 @@ protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
+    void keyPressEvent(QKeyEvent *event) override;
+    QVariant loadResource(int type, const QUrl &name) override;
 
 private:
+    QString m_filePath;
+    QString m_encodingName;
+    EolFormat m_eolFormat;
+
     QString m_headerText;
     QString m_footerText;
 

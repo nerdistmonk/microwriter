@@ -9,16 +9,20 @@
 #include <QTextCursor>
 #include <QMouseEvent>
 #include <QTextBlock>
-#include <QTextLayout>
+#include <QTextFragment>
 #include <QTextImageFormat>
 #include <QUrl>
+#include <QRegularExpression>
+#include <QDir>
+#include <QFileInfo>
+#include <QImage>
 
 EditorView::EditorView(QWidget *parent)
     : QTextEdit(parent),
-      filePath(""),
       isPrintLayout(false),
-      encodingName("UTF-8"),
-      eolFormat(EolLf),
+      m_filePath(""),
+      m_encodingName("UTF-8"),
+      m_eolFormat(EolLf),
       m_headerText(""),
       m_footerText(""),
       m_selectedImagePos(-1),
@@ -33,7 +37,70 @@ EditorView::EditorView(QWidget *parent)
     fmt.setRightMargin(20);
     document()->rootFrame()->setFrameFormat(fmt);
 
+    // Reset modification flag so initial frame setup doesn't make a blank document dirty
+    document()->setModified(false);
+
     viewport()->setMouseTracking(true);
+}
+
+void EditorView::setDarkMode(bool dark) {
+    Q_UNUSED(dark);
+    // Background and text colors are updated by applyLayoutModeToEditor
+}
+
+QString EditorView::getContentForSave() {
+    QString content;
+    if (m_filePath.endsWith(".md")) {
+        content = toMarkdown();
+
+        for (QTextBlock blk = document()->begin(); blk.isValid(); blk = blk.next()) {
+            for (QTextBlock::iterator it = blk.begin(); !it.atEnd(); ++it) {
+                QTextFragment frag = it.fragment();
+                if (frag.isValid() && frag.charFormat().isImageFormat()) {
+                    QTextImageFormat ifmt = frag.charFormat().toImageFormat();
+                    if (ifmt.width() > 0 && ifmt.height() > 0) {
+                        QString target = QString("![image](%1)").arg(ifmt.name());
+                        QString replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
+                            .arg(ifmt.name())
+                            .arg((int)ifmt.width())
+                            .arg((int)ifmt.height());
+                        content.replace(target, replacement);
+                    }
+                }
+            }
+        }
+    } else if (m_filePath.endsWith(".html") || m_filePath.endsWith(".htm")) {
+        content = toHtml();
+        content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
+    } else {
+        content = toPlainText();
+    }
+    return content;
+}
+
+void EditorView::setContent(const QString &content, const QString &fileName) {
+    m_filePath = fileName;
+    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
+        setHtml(content);
+    } else if (fileName.endsWith(".md")) {
+        setMarkdown(content);
+    } else {
+        setPlainText(content);
+    }
+    document()->setModified(false);
+}
+
+EditorStats EditorView::getStats() const {
+    EditorStats s;
+    QString txt = toPlainText();
+    s.characters = txt.length();
+    s.words = txt.trimmed().isEmpty() ? 0 : txt.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts).count();
+    QTextCursor c = textCursor();
+    s.line = c.blockNumber() + 1;
+    s.column = c.columnNumber() + 1;
+    s.encoding = m_encodingName;
+    s.eol = m_eolFormat;
+    return s;
 }
 
 void EditorView::setLeftMarginPixels(qreal pixels) {
@@ -97,9 +164,57 @@ QRect EditorView::cornerHandleRect() const {
                  handleSize, handleSize);
 }
 
+void EditorView::keyPressEvent(QKeyEvent *event) {
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        QTextCharFormat formatToKeep = currentCharFormat();
+
+        // Block signals briefly so intermediate cursor change doesn't flash default font in toolbar
+        bool oldBlocked = blockSignals(true);
+
+        QTextEdit::keyPressEvent(event);
+
+        setCurrentCharFormat(formatToKeep);
+
+        blockSignals(oldBlocked);
+
+        emit cursorPositionChanged();
+        return;
+    }
+
+    QTextEdit::keyPressEvent(event);
+}
+
+QVariant EditorView::loadResource(int type, const QUrl &name) {
+    if (type == QTextDocument::ImageResource) {
+        // Check document resource cache first
+        QVariant res = QTextEdit::loadResource(type, name);
+        if (res.isValid() && !res.isNull()) {
+            return res;
+        }
+
+        // If not cached, resolve relative to file location
+        QString rawPath = name.toLocalFile();
+        if (rawPath.isEmpty()) {
+            rawPath = name.toString();
+        }
+
+        if (!m_filePath.isEmpty()) {
+            QDir docDir = QFileInfo(m_filePath).dir();
+            QString resolvedPath = docDir.filePath(rawPath);
+            if (QFileInfo::exists(resolvedPath)) {
+                QImage img(resolvedPath);
+                if (!img.isNull()) {
+                    document()->addResource(QTextDocument::ImageResource, name, img);
+                    return img;
+                }
+            }
+        }
+    }
+    return QTextEdit::loadResource(type, name);
+}
+
 void EditorView::mousePressEvent(QMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
-        // 1. If an image is selected and user clicks its resize handle
         if (m_selectedImagePos >= 0 && cornerHandleRect().contains(event->pos())) {
             m_isResizingImage = true;
             QRect cur = currentImageRect();
@@ -108,12 +223,10 @@ void EditorView::mousePressEvent(QMouseEvent *event) {
             return;
         }
 
-        // 2. Find image character at or adjacent to the clicked position
         QTextCursor clickedCursor = cursorForPosition(event->pos());
         int pos = clickedCursor.position();
         int imagePos = -1;
 
-        // Check character right after cursor position
         if (pos < document()->characterCount()) {
             QTextCursor test(document());
             test.setPosition(pos);
@@ -123,7 +236,6 @@ void EditorView::mousePressEvent(QMouseEvent *event) {
             }
         }
 
-        // Check character right before cursor position
         if (imagePos == -1 && pos > 0) {
             QTextCursor test(document());
             test.setPosition(pos - 1);
@@ -162,7 +274,6 @@ void EditorView::mousePressEvent(QMouseEvent *event) {
             viewport()->update();
             return;
         } else {
-            // Clicked regular text or blank space: deselect
             if (m_selectedImagePos != -1) {
                 m_selectedImagePos = -1;
                 viewport()->update();
@@ -239,7 +350,6 @@ void EditorView::paintEvent(QPaintEvent *event) {
         }
     }
 
-    // Print layout page breaks
     if (isPrintLayout) {
         QPainter painter(viewport());
         painter.setPen(QPen(QColor(200, 50, 50), 2, Qt::DashLine));

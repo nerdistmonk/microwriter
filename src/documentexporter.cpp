@@ -43,8 +43,8 @@ void exportPdf(EditorView *editor, QWidget *parent) {
     if (!editor) return;
 
     QString defaultPath = "untitled.pdf";
-    if (!editor->filePath.isEmpty()) {
-        QFileInfo fi(editor->filePath);
+    if (!editor->filePath().isEmpty()) {
+    QFileInfo fi(editor->filePath());
         defaultPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".pdf";
     }
 
@@ -145,8 +145,8 @@ void exportOdt(EditorView *editor, QWidget *parent) {
     if (!editor) return;
 
     QString defaultPath = "untitled.odt";
-    if (!editor->filePath.isEmpty()) {
-        QFileInfo fi(editor->filePath);
+    if (!editor->filePath().isEmpty()) {
+    QFileInfo fi(editor->filePath());;
         defaultPath = fi.absolutePath() + "/" + fi.completeBaseName() + ".odt";
     }
 

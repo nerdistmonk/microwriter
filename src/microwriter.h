@@ -4,6 +4,7 @@
 #include <QMainWindow>
 #include <QList>
 #include "types.h"
+#include "baseeditor.h"
 
 class EditorView;
 class Ruler;
@@ -22,6 +23,8 @@ class MicroWriter : public QMainWindow {
 public:
     explicit MicroWriter(QWidget *parent = nullptr);
     void openFilePath(const QString &fileName);
+
+    BaseEditor* currentBaseEditor() const;
     EditorView* currentEditor() const;
 
     void updateFormatToolbarState();
@@ -50,11 +53,12 @@ private:
     void createStatusBar();
     void saveToolbarSettings();
     void loadToolbarSettings();
-    bool maybeSave(EditorView *editor);
+    bool maybeSaveTab(int index);
     void writeFile(const QString &fileName);
     void applyLayoutModeToEditor(EditorView *editor, LayoutMode mode);
     void updateStats();
     void updateWindowTitleAndStats();
+    void attachEditorSignals(BaseEditor *editor);
 
     Ruler *ruler;
     QTabWidget *tabWidget;

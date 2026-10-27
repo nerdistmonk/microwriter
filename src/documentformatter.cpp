@@ -103,8 +103,7 @@ void applyFontFamily(EditorView *editor, const QFont &font) {
         editor->mergeCurrentCharFormat(fmt);
     }
 
-    // Keep the document default aligned if changing the entire document/empty document
-    if (editor->toPlainText().isEmpty() || !cursor.hasSelection()) {
+    if (editor->toPlainText().isEmpty()) {
         QFont docFont = editor->document()->defaultFont();
         docFont.setFamily(font.family());
         editor->document()->setDefaultFont(docFont);
@@ -123,7 +122,7 @@ void applyFontSize(EditorView *editor, int size) {
         editor->mergeCurrentCharFormat(fmt);
     }
 
-    if (editor->toPlainText().isEmpty() || !cursor.hasSelection()) {
+    if (editor->toPlainText().isEmpty()) {
         QFont docFont = editor->document()->defaultFont();
         docFont.setPointSize(size);
         editor->document()->setDefaultFont(docFont);
@@ -235,8 +234,8 @@ void insertImage(EditorView *editor, QWidget *parent) {
             // Determine relative path if the document already has a file path,
             // otherwise use fileName or relative file name
             QString imageRef = fileName;
-            if (!editor->filePath.isEmpty()) {
-                QDir docDir = QFileInfo(editor->filePath).dir();
+            if (!editor->filePath().isEmpty()) {
+                QDir docDir = QFileInfo(editor->filePath()).dir();
                 imageRef = docDir.relativeFilePath(fileName);
             } else {
                 imageRef = QFileInfo(fileName).fileName();

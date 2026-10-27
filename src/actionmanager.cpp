@@ -58,8 +58,8 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         encGrp->addAction(act);
         encMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, enc](){
-            if (m_window->currentEditor()) {
-                m_window->currentEditor()->encodingName = enc;
+            if (m_window->currentBaseEditor()) {
+                m_window->currentBaseEditor()->setEncodingName(enc);
                 m_window->updateFormatToolbarState();
             }
         });
@@ -74,8 +74,8 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         eolGrp->addAction(act);
         eolMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, eol](){
-            if (m_window->currentEditor()) {
-                m_window->currentEditor()->eolFormat = eol;
+            if (m_window->currentBaseEditor()) {
+                m_window->currentBaseEditor()->setEolFormat(eol);
                 m_window->updateFormatToolbarState();
             }
         });
@@ -108,14 +108,14 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         QAction *act = new QAction(title, m_window);
         act->setShortcut(seq);
         connect(act, &QAction::triggered, this, [this, fn](){
-            if (m_window->currentEditor()) (m_window->currentEditor()->*fn)();
+            if (m_window->currentBaseEditor()) (m_window->currentBaseEditor()->*fn)();
         });
         editMenu->addAction(act);
         registerAction(act);
     };
 
-    addEditAct(tr("&Undo"), QKeySequence::Undo, &EditorView::undo);
-    addEditAct(tr("&Redo"), QKeySequence::Redo, &EditorView::redo);
+    addEditAct(tr("&Undo"), QKeySequence::Undo, &BaseEditor::undo);
+    addEditAct(tr("&Redo"), QKeySequence::Redo, &BaseEditor::redo);
 
     editMenu->addSeparator();
     QAction *findAct = new QAction(tr("&Find & Replace..."), m_window);
@@ -268,6 +268,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     addLayout(tr("&Normal Layout"), NormalLayout, true);
     addLayout(tr("&Web Layout"), WebLayout, false);
     addLayout(tr("&Print Layout"), PrintLayout, false);
+    addLayout(tr("&Code Layout"), CodeLayout, false);
 
     viewMenu->addSeparator();
     QAction *darkAct = new QAction(tr("Dark Mode"), m_window);
