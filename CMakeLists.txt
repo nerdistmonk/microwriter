@@ -8,6 +8,13 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets PrintSupport)
 
 set(CMAKE_AUTOMOC ON)
 
-add_executable(microwriter main.cpp)
+add_executable(microwriter
+    src/main.cpp
+    src/editorview.cpp
+    src/ruler.cpp
+    src/dialogs.cpp
+    src/microwriter.cpp
+)
 
+target_include_directories(microwriter PRIVATE src)
 target_link_libraries(microwriter PRIVATE Qt6::Widgets Qt6::PrintSupport)
