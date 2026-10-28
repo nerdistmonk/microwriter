@@ -93,7 +93,7 @@ export capabilities. *******
 |`Ctrl + J`      |**Justify**  |
 
 ```bash
-**MicroWriter TUI**
+# MicroWriter TUI
 ```
 **The diet soda of word processors, now in a refreshing display server free
 flavor!**
