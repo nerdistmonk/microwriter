@@ -1,4 +1,4 @@
-# MicroWriter
+# Microwriter
 
 **The diet soda of word processors, same refreshing taste, half the calories!**
 
