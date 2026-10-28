@@ -95,7 +95,7 @@ private:
             "Exit"
         },
         {"Undo", "Redo", "Cut", "Copy", "Paste", "Duplicate Line/Block", "Find & Replace"},
-        {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Blockquote", "Insert Table", "Horizontal Line"},
+        {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line"},
         {"Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase"},
         {"About MicroWriter TUI", "Regex Cheat Sheet", "HTML Quick Reference", "Sed & Utilities Cheat Sheet", "Useful Bash Scripts"}
     };
@@ -140,27 +140,86 @@ private:
             std::string rawContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             if (rawContent.find("\r\n") != std::string::npos) d.eolFormat = "CRLF";
 
-            if (d.mode == TuiMode::RichText && (ext == "html" || ext == "htm") && rawContent.find("<p") != std::string::npos) {
+            // Parse HTML for paragraphs, lists, and tables with full Qt6 compatibility
+            if (d.mode == TuiMode::RichText && (ext == "html" || ext == "htm") &&
+                (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos)) {
                 size_t pos = 0;
-                while ((pos = rawContent.find("<p", pos)) != std::string::npos) {
-                    size_t closeP = rawContent.find(">", pos);
-                    if (closeP == std::string::npos) break;
-                    size_t endP = rawContent.find("</p>", closeP);
-                    if (endP == std::string::npos) break;
+                int currentOlNum = 1;
+                bool insideOl = false;
 
-                    std::string lineContent = rawContent.substr(closeP + 1, endP - closeP - 1);
-                    if (lineContent == "<br />" || lineContent == "<br>" || lineContent == "<br/>") {
-                        d.lines.push_back("");
-                    } else {
-                        d.lines.push_back(lineContent);
+                while (pos < rawContent.length()) {
+                    size_t nextTag = rawContent.find('<', pos);
+                    if (nextTag == std::string::npos) break;
+
+                    if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
+                        insideOl = true;
+                        currentOlNum = 1;
+                        pos = rawContent.find('>', nextTag) + 1;
+                        continue;
                     }
-                    pos = endP + 4;
+                    if (rawContent.compare(nextTag, 5, "</ol>", 5) == 0) {
+                        insideOl = false;
+                        pos = nextTag + 5;
+                        continue;
+                    }
+                    if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
+                        insideOl = false;
+                        pos = rawContent.find('>', nextTag) + 1;
+                        continue;
+                    }
+                    if (rawContent.compare(nextTag, 5, "</ul>", 5) == 0) {
+                        pos = nextTag + 5;
+                        continue;
+                    }
+
+                    // Process <p> tags
+                    if (rawContent.compare(nextTag, 2, "<p", 2) == 0 && (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
+                        size_t closeTag = rawContent.find('>', nextTag);
+                        if (closeTag == std::string::npos) break;
+                        size_t endP = rawContent.find("</p>", closeTag);
+                        if (endP == std::string::npos) break;
+
+                        std::string lineContent = rawContent.substr(closeTag + 1, endP - closeTag - 1);
+                        if (lineContent == "<br />" || lineContent == "<br>" || lineContent == "<br/>") {
+                            d.lines.push_back("");
+                        } else {
+                            d.lines.push_back(lineContent);
+                        }
+                        pos = endP + 4;
+                        continue;
+                    }
+
+                    // Process <li> tags
+                    if (rawContent.compare(nextTag, 3, "<li", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
+                        size_t closeTag = rawContent.find('>', nextTag);
+                        if (closeTag == std::string::npos) break;
+                        size_t endLi = rawContent.find("</li>", closeTag);
+                        if (endLi == std::string::npos) break;
+
+                        std::string liContent = rawContent.substr(closeTag + 1, endLi - closeTag - 1);
+                        if (insideOl) {
+                            d.lines.push_back(std::to_string(currentOlNum++) + ". " + liContent);
+                        } else {
+                            d.lines.push_back("• " + liContent);
+                        }
+                        pos = endLi + 5;
+                        continue;
+                    }
+
+                    pos = nextTag + 1;
                 }
             } else {
                 std::stringstream ss(rawContent);
                 std::string line;
                 while (std::getline(ss, line)) {
                     if (!line.empty() && line.back() == '\r') line.pop_back();
+
+                    // Convert markdown bullet markers to TUI bullets on load
+                    if (d.mode == TuiMode::RichText && ext == "md") {
+                        if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
+                            line = "• " + line.substr(2);
+                        }
+                    }
                     d.lines.push_back(line);
                 }
             }
@@ -178,25 +237,60 @@ private:
         TuiView::render(m_documents, m_activeDocIdx, false, 0, m_topMenus, false);
     }
 
-    void saveCurrentFile() {
-        if (doc().filePath.empty()) {
-            std::string path = TuiDialogs::showPromptModal("Save As File: ");
-            if (path.empty()) return;
-            doc().filePath = path;
-            size_t lastSlash = path.find_last_of("/\\");
-            doc().title = (lastSlash == std::string::npos) ? path : path.substr(lastSlash + 1);
+    void saveAsFile() {
+        std::string curPath = doc().filePath;
+        if (curPath.empty()) curPath = "untitled";
+        
+        int fmtType = (curPath.length() >= 3 && curPath.compare(curPath.length() - 3, 3, ".md") == 0) ? 1 : 0;
+        if (!TuiDialogs::showSaveAsModal(curPath, fmtType)) {
+            return;
         }
 
-        std::ofstream out(doc().filePath, std::ios::binary);
+        doc().filePath = curPath;
+        size_t lastSlash = curPath.find_last_of("/\\");
+        doc().title = (lastSlash == std::string::npos) ? curPath : curPath.substr(lastSlash + 1);
+
+        writeDocumentToFile(curPath);
+    }
+
+    void saveCurrentFile() {
+        if (doc().filePath.empty()) {
+            saveAsFile();
+            return;
+        }
+        writeDocumentToFile(doc().filePath);
+    }
+
+    void writeDocumentToFile(const std::string &path) {
+        std::ofstream out(path, std::ios::binary);
         if (!out.is_open()) return;
 
         std::string ext = "";
-        size_t dot = doc().filePath.find_last_of('.');
+        size_t dot = path.find_last_of('.');
         if (dot != std::string::npos) {
-            ext = doc().filePath.substr(dot + 1);
+            ext = path.substr(dot + 1);
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
 
+        // 1. Markdown Save (.md): Translate bullets and preserve lists
+        if (doc().mode == TuiMode::RichText && ext == "md") {
+            for (size_t i = 0; i < doc().lines.size(); ++i) {
+                const std::string &l = doc().lines[i];
+                if (l.rfind("• ", 0) == 0) {
+                    out << "- " << l.substr(std::string("• ").length());
+                } else {
+                    out << l;
+                }
+                if (i + 1 < doc().lines.size()) {
+                    out << (doc().eolFormat == "CRLF" ? "\r\n" : (doc().eolFormat == "CR" ? "\r" : "\n"));
+                }
+            }
+            doc().modified = false;
+            triggerSaveFlash();
+            return;
+        }
+
+        // 2. HTML Save (.html / .htm): Group list items into valid <ul> and <ol> tags
         if (doc().mode == TuiMode::RichText && (ext == "html" || ext == "htm")) {
             bool hasHtmlRoot = false;
             for (const auto &l : doc().lines) {
@@ -210,18 +304,55 @@ private:
                 out << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" />\n";
                 out << "<style type=\"text/css\">\n";
                 out << "p { margin: 0px; white-space: pre-wrap; }\n";
+                out << "ul, ol { margin: 0px 0px 0px 24px; padding: 0px; }\n";
                 out << "</style></head><body>\n";
 
+                bool inUl = false;
+                bool inOl = false;
+
                 for (const auto &l : doc().lines) {
-                    if (l.empty()) {
-                        out << "<p><br /></p>\n";
-                    } else if (l.find("<table") != std::string::npos || l.find("<hr") != std::string::npos ||
-                               l.find("<tr") != std::string::npos || l.find("<td") != std::string::npos) {
-                        out << l << "\n";
+                    bool isBullet = (l.rfind("• ", 0) == 0);
+
+                    // Check for numbered list (e.g. "1. Item")
+                    size_t dotPos = l.find(". ");
+                    bool isNumbered = false;
+                    if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+                        bool allDigits = true;
+                        for (size_t d = 0; d < dotPos; ++d) {
+                            if (!std::isdigit(static_cast<unsigned char>(l[d]))) {
+                                allDigits = false;
+                                break;
+                            }
+                        }
+                        if (allDigits) isNumbered = true;
+                    }
+
+                    if (isBullet) {
+                        if (inOl) { out << "</ol>\n"; inOl = false; }
+                        if (!inUl) { out << "<ul>\n"; inUl = true; }
+                        out << "<li>" << l.substr(std::string("• ").length()) << "</li>\n";
+                    } else if (isNumbered) {
+                        if (inUl) { out << "</ul>\n"; inUl = false; }
+                        if (!inOl) { out << "<ol>\n"; inOl = true; }
+                        out << "<li>" << l.substr(dotPos + 2) << "</li>\n";
                     } else {
-                        out << "<p>" << l << "</p>\n";
+                        if (inUl) { out << "</ul>\n"; inUl = false; }
+                        if (inOl) { out << "</ol>\n"; inOl = false; }
+
+                        if (l.empty()) {
+                            out << "<p><br /></p>\n";
+                        } else if (l.find("<table") != std::string::npos || l.find("<hr") != std::string::npos ||
+                                   l.find("<tr") != std::string::npos || l.find("<td") != std::string::npos) {
+                            out << l << "\n";
+                        } else {
+                            out << "<p>" << l << "</p>\n";
+                        }
                     }
                 }
+
+                if (inUl) out << "</ul>\n";
+                if (inOl) out << "</ol>\n";
+
                 out << "</body></html>\n";
                 doc().modified = false;
                 triggerSaveFlash();
@@ -229,6 +360,7 @@ private:
             }
         }
 
+        // 3. Fallback standard plaintext / source code serialization
         for (size_t i = 0; i < doc().lines.size(); ++i) {
             out << doc().lines[i];
             if (i + 1 < doc().lines.size()) out << (doc().eolFormat == "CRLF" ? "\r\n" : (doc().eolFormat == "CR" ? "\r" : "\n"));
@@ -262,14 +394,14 @@ private:
     void closeDocument(size_t index) {
         if (index >= m_documents.size()) return;
         if (m_documents[index].modified) {
-            std::string res = TuiDialogs::showPromptModal("Unsaved changes in " + m_documents[index].title + ". Save first? (y/n/c): ");
-            if (res == "y" || res == "Y") {
+            int res = TuiDialogs::showConfirmModal("Save Changes?", "Unsaved changes in " + m_documents[index].title + ". Save first?");
+            if (res == 1) { // Save
                 size_t oldActive = m_activeDocIdx;
                 m_activeDocIdx = index;
                 saveCurrentFile();
                 m_activeDocIdx = oldActive;
-            } else if (res != "n" && res != "N") {
-                return; // Cancelled
+            } else if (res == 0) { // Cancel
+                return;
             }
         }
         m_documents.erase(m_documents.begin() + index);
@@ -292,11 +424,11 @@ private:
             m_running = false;
             return;
         }
-        std::string res = TuiDialogs::showPromptModal("Unsaved changes. Save before quit? (y/n/c): ");
-        if (res == "y" || res == "Y") {
+        int res = TuiDialogs::showConfirmModal("Quit MicroWriter", "You have unsaved changes. Save before quitting?");
+        if (res == 1) { // Save
             saveCurrentFile();
             m_running = false;
-        } else if (res == "n" || res == "N") {
+        } else if (res == 2) { // Discard / No
             m_running = false;
         }
     }
@@ -317,7 +449,7 @@ private:
             }
             else if (itemIdx == 1) promptOpen();
             else if (itemIdx == 2) saveCurrentFile();
-            else if (itemIdx == 3) { doc().filePath = ""; saveCurrentFile(); }
+            else if (itemIdx == 3) saveAsFile();
             else if (itemIdx == 4) doc().mode = (doc().mode == TuiMode::RichText) ? TuiMode::Code : TuiMode::RichText;
             else if (itemIdx == 5) { doc().encoding = "UTF-8"; doc().modified = true; }
             else if (itemIdx == 6) { doc().encoding = "Windows-1252"; doc().modified = true; }
@@ -342,9 +474,11 @@ private:
             else if (itemIdx == 3) TuiActions::injectTagAroundSelection(doc(), "<b>", "</b>");
             else if (itemIdx == 4) TuiActions::injectTagAroundSelection(doc(), "<i>", "</i>");
             else if (itemIdx == 5) TuiActions::injectTagAroundSelection(doc(), "<u>", "</u>");
-            else if (itemIdx == 6) TuiActions::injectTagAroundSelection(doc(), "<blockquote>", "</blockquote>");
-            else if (itemIdx == 7) TuiActions::handleInsertTable(doc());
-            else if (itemIdx == 8) {
+            else if (itemIdx == 6) TuiActions::handleInsertBulletList(doc());
+            else if (itemIdx == 7) TuiActions::handleInsertNumberedList(doc());
+            else if (itemIdx == 8) TuiActions::injectTagAroundSelection(doc(), "<blockquote>", "</blockquote>");
+            else if (itemIdx == 9) TuiActions::handleInsertTable(doc());
+            else if (itemIdx == 10) {
                 doc().pushUndo();
                 doc().lines[doc().cursor.line].insert(doc().cursor.col, "<hr>");
                 doc().modified = true;
@@ -632,11 +766,17 @@ private:
             }
             return;
         }
-        if (ch == KEY_F(4)) { TuiActions::handleFindReplace(doc()); return; }
+        if (ch == KEY_F(4) || ch == 6) { // F4 or Ctrl + F (ASCII 6)
+            TuiActions::handleFindReplace(doc());
+            return;
+        }
         if (ch == KEY_F(5)) { doc().mode = TuiMode::RichText; return; }
         if (ch == KEY_F(6)) { doc().mode = TuiMode::Code; return; }
-        if (ch == KEY_F(7)) { promptOpen(); return; }
-        if (ch == KEY_F(8) || ch == 19) { // F8 or Ctrl + S to save
+        if (ch == KEY_F(7) || ch == 15) { // F7 or Ctrl + O (ASCII 15)
+            promptOpen();
+            return;
+        }
+        if (ch == KEY_F(8) || ch == 19) { // F8 or Ctrl + S (ASCII 19)
             saveCurrentFile();
             return;
         }
@@ -647,22 +787,25 @@ private:
                                  [this](int m, int it) { executeMenuAction(m, it); });
             return;
         }
-        if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; }
+        if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; } // F12 or Ctrl + Q (ASCII 17)
 
         // Control shortcuts
-        if (ch == 3) { TuiActions::handleCutCopy(doc(), false); return; }
-        if (ch == 24) { TuiActions::handleCutCopy(doc(), true); return; }
-        if (ch == 4) { doc().hasSelection = false; cutEntireLine(); return; }
-        if (ch == 22) { TuiActions::handlePaste(doc()); return; }
-        if (ch == 1) {
+        if (ch == 3) { TuiActions::handleCutCopy(doc(), false); return; } // Ctrl + C
+        if (ch == 24) { TuiActions::handleCutCopy(doc(), true); return; } // Ctrl + X
+        if (ch == 4) { doc().hasSelection = false; cutEntireLine(); return; } // Ctrl + D
+        if (ch == 22) { TuiActions::handlePaste(doc()); return; } // Ctrl + V
+        if (ch == 1) { // Ctrl + A
             doc().selectionAnchor = {0, 0};
             doc().cursor.line = static_cast<int>(doc().lines.size()) - 1;
             doc().cursor.col = static_cast<int>(doc().lines.back().length());
             doc().hasSelection = true;
             return;
         }
-        if (ch == 18) { TuiActions::handleRedo(doc()); return; }
-        if (ch == 5) { TuiActions::handleUndo(doc()); return; }
+        if (ch == 18) { TuiActions::handleRedo(doc()); return; } // Ctrl + R
+        if (ch == 26 || ch == 5) { // Ctrl + Z (ASCII 26) or Ctrl + E (ASCII 5)
+            TuiActions::handleUndo(doc());
+            return;
+        }
 
         // Tab key: Indent selection or insert 4 spaces
         if (ch == 9) {
@@ -740,6 +883,36 @@ private:
             if (doc().mode == TuiMode::Code && TuiActions::handleSmartBackspace(doc())) {
                 return;
             }
+
+            // Smart Backspace on List Markers (removes "• " or "X. " in one keystroke)
+            if (doc().mode == TuiMode::RichText) {
+                std::string &cur = doc().lines[doc().cursor.line];
+                if (cur.rfind("• ", 0) == 0 && doc().cursor.col <= static_cast<int>(std::string("• ").length())) {
+                    doc().pushUndo();
+                    cur.erase(0, std::string("• ").length());
+                    doc().cursor.col = 0;
+                    doc().modified = true;
+                    return;
+                }
+                size_t dotPos = cur.find(". ");
+                if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+                    bool allDigits = true;
+                    for (size_t d = 0; d < dotPos; ++d) {
+                        if (!std::isdigit(static_cast<unsigned char>(cur[d]))) {
+                            allDigits = false;
+                            break;
+                        }
+                    }
+                    if (allDigits && doc().cursor.col <= static_cast<int>(dotPos + 2)) {
+                        doc().pushUndo();
+                        cur.erase(0, dotPos + 2);
+                        doc().cursor.col = 0;
+                        doc().modified = true;
+                        return;
+                    }
+                }
+            }
+
             doc().pushUndo();
             if (doc().cursor.col > 0) {
                 doc().lines[doc().cursor.line].erase(doc().cursor.col - 1, 1);
@@ -763,15 +936,61 @@ private:
                 doc().pushUndo();
                 std::string cur = doc().lines[doc().cursor.line];
                 std::string rem = cur.substr(doc().cursor.col);
-                doc().lines[doc().cursor.line] = cur.substr(0, doc().cursor.col);
-                doc().lines.insert(doc().lines.begin() + doc().cursor.line + 1, rem);
+                std::string prefix = cur.substr(0, doc().cursor.col);
+
+                // Check for bullet list continuation
+                if (prefix == "• ") {
+                    // Empty bullet item: exit list mode and leave a blank line
+                    doc().lines[doc().cursor.line] = "";
+                    doc().cursor.col = 0;
+                    doc().modified = true;
+                    return;
+                }
+
+                // Check for numbered list continuation (e.g., "1. ", "2. ")
+                size_t dotPos = prefix.find(". ");
+                bool isNumbered = false;
+                int currentNum = 0;
+                if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+                    bool allDigits = true;
+                    for (size_t d = 0; d < dotPos; ++d) {
+                        if (!std::isdigit(static_cast<unsigned char>(prefix[d]))) {
+                            allDigits = false;
+                            break;
+                        }
+                    }
+                    if (allDigits) {
+                        isNumbered = true;
+                        currentNum = std::atoi(prefix.substr(0, dotPos).c_str());
+                        if (prefix == prefix.substr(0, dotPos + 2)) {
+                            // Empty numbered item: exit list mode and leave a blank line
+                            doc().lines[doc().cursor.line] = "";
+                            doc().cursor.col = 0;
+                            doc().modified = true;
+                            return;
+                        }
+                    }
+                }
+
+                std::string nextLinePrefix = "";
+                if (prefix.rfind("• ", 0) == 0) {
+                    nextLinePrefix = "• ";
+                } else if (isNumbered) {
+                    nextLinePrefix = std::to_string(currentNum + 1) + ". ";
+                }
+
+                doc().lines[doc().cursor.line] = prefix;
+                doc().lines.insert(doc().lines.begin() + doc().cursor.line + 1, nextLinePrefix + rem);
                 doc().cursor.line++;
-                doc().cursor.col = 0;
+                doc().cursor.col = static_cast<int>(nextLinePrefix.length());
                 doc().modified = true;
             }
         } else if (ch >= 32 && ch <= 126) {
             if (doc().hasSelection) {
                 TuiActions::handleDeleteSelection(doc());
+            } else if (doc().undoStack.empty() || ch == ' ' || doc().cursor.col == 0) {
+                // Ensure immediate baseline snapshot on line 1, as well as word boundary snapshots
+                doc().pushUndo();
             }
             doc().lines[doc().cursor.line].insert(doc().cursor.col, 1, static_cast<char>(ch));
             doc().cursor.col++;

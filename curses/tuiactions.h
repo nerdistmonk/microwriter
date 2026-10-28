@@ -10,6 +10,8 @@ namespace TuiActions {
     void handleFontSizeSelection(EditorDocument &doc);
     void handleColorSelection(EditorDocument &doc);
     void handleInsertTable(EditorDocument &doc);
+    void handleInsertBulletList(EditorDocument &doc);
+    void handleInsertNumberedList(EditorDocument &doc);
 
     void handleDeleteSelection(EditorDocument &doc);
     void handleCutCopy(EditorDocument &doc, bool isCut);

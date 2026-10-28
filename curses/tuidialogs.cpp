@@ -89,6 +89,189 @@ std::string showPromptModal(const std::string &prompt) {
     }
 }
 
+int showConfirmModal(const std::string &title, const std::string &message) {
+    int width = std::max(56, std::min(COLS - 4, static_cast<int>(message.length()) + 8));
+    int height = 7;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+    drawDialogBorder(win, height, width);
+
+    mvwprintw(win, 1, (width - static_cast<int>(title.length())) / 2, "%s", title.c_str());
+    mvwprintw(win, 3, (width - static_cast<int>(message.length())) / 2, "%s", message.c_str());
+    mvwprintw(win, 5, (width - 34) / 2, "[Y] Save   [N] Discard   [Esc] Cancel");
+    wrefresh(win);
+
+    while (true) {
+        int ch = wgetch(win);
+
+        if (ch == 'y' || ch == 'Y' || ch == 10 || ch == KEY_ENTER) {
+            delwin(win);
+            return 1; // Save
+        }
+        if (ch == 'n' || ch == 'N' || ch == 'd' || ch == 'D') {
+            delwin(win);
+            return 2; // Discard / No
+        }
+        if (ch == 'c' || ch == 'C' || ch == 27) {
+            delwin(win);
+            return 0; // Cancel
+        }
+
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            if (getmouse(&ev) == OK && (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
+                int localY = ev.y - startY;
+                int localX = ev.x - startX;
+                if (localY == 5) {
+                    int btnCenter = (width - 34) / 2;
+                    // [Y] Save -> btnCenter to btnCenter + 9
+                    if (localX >= btnCenter && localX <= btnCenter + 9) {
+                        delwin(win);
+                        return 1;
+                    }
+                    // [N] Discard -> btnCenter + 12 to btnCenter + 24
+                    if (localX >= btnCenter + 12 && localX <= btnCenter + 24) {
+                        delwin(win);
+                        return 2;
+                    }
+                    // [Esc] Cancel -> btnCenter + 27 to btnCenter + 38
+                    if (localX >= btnCenter + 27 && localX <= btnCenter + 38) {
+                        delwin(win);
+                        return 0;
+                    }
+                }
+            }
+        }
+    }
+}
+
+bool showSaveAsModal(std::string &filePath, int &formatType) {
+    int width = 60;
+    int height = 9;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+
+    int focusField = 0; // 0 = File name input, 1 = Format selector
+    std::string inputName = filePath;
+    int currentFmt = formatType; // 0 = HTML (.html), 1 = Markdown (.md)
+
+    int maxInputLen = width - 16;
+
+    while (true) {
+        werase(win);
+        drawDialogBorder(win, height, width);
+
+        mvwprintw(win, 1, (width - 15) / 2, "Save Document As");
+
+        // Row 3: File path / name input
+        mvwprintw(win, 3, 3, "Name:   [");
+        int dispOffset = 0;
+        if (static_cast<int>(inputName.length()) > maxInputLen) {
+            dispOffset = static_cast<int>(inputName.length()) - maxInputLen;
+        }
+        std::string dispName = inputName.substr(dispOffset, maxInputLen);
+        if (focusField == 0) wattron(win, A_REVERSE);
+        mvwprintw(win, 3, 12, "%-*s", maxInputLen, dispName.c_str());
+        if (focusField == 0) wattroff(win, A_REVERSE);
+        wprintw(win, "]");
+
+        // Row 5: Format selector
+        mvwprintw(win, 5, 3, "Format: ");
+        if (focusField == 1) wattron(win, A_REVERSE);
+        if (currentFmt == 0) {
+            mvwprintw(win, 5, 12, "< HTML Document (*.html) >");
+        } else {
+            mvwprintw(win, 5, 12, "< Markdown File (*.md)   >");
+        }
+        if (focusField == 1) wattroff(win, A_REVERSE);
+
+        // Row 7: Helper instructions
+        mvwprintw(win, 7, 3, "Tab: Switch | Space/Arrows: Toggle | Enter: Save");
+
+        wrefresh(win);
+        int ch = wgetch(win);
+
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            if (getmouse(&ev) == OK && (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
+                int localY = ev.y - startY;
+                if (localY == 3) focusField = 0;
+                else if (localY == 5) {
+                    focusField = 1;
+                    currentFmt = (currentFmt == 0) ? 1 : 0;
+                }
+            }
+            continue;
+        }
+
+        if (ch == 27) { // Escape: cancel
+            delwin(win);
+            return false;
+        }
+
+        if (ch == '\t' || ch == KEY_DOWN) {
+            focusField = (focusField == 0) ? 1 : 0;
+            continue;
+        }
+        if (ch == KEY_BTAB || ch == KEY_UP) {
+            focusField = (focusField == 1) ? 0 : 1;
+            continue;
+        }
+
+        if (focusField == 1) {
+            if (ch == ' ' || ch == KEY_LEFT || ch == KEY_RIGHT) {
+                currentFmt = (currentFmt == 0) ? 1 : 0;
+                continue;
+            }
+        }
+
+        if (ch == 10 || ch == KEY_ENTER) {
+            if (inputName.empty()) {
+                inputName = (currentFmt == 0) ? "untitled.html" : "untitled.md";
+            } else {
+                std::string targetExt = (currentFmt == 0) ? ".html" : ".md";
+                // Strip existing extension if mismatched or missing
+                size_t dotPos = inputName.find_last_of('.');
+                size_t slashPos = inputName.find_last_of("/\\");
+                if (dotPos == std::string::npos || (slashPos != std::string::npos && dotPos < slashPos)) {
+                    inputName += targetExt;
+                } else {
+                    std::string curExt = inputName.substr(dotPos);
+                    std::transform(curExt.begin(), curExt.end(), curExt.begin(), ::tolower);
+                    if (curExt != ".html" && curExt != ".htm" && curExt != ".md" && curExt != ".txt" && curExt != ".cpp") {
+                        inputName += targetExt;
+                    } else if (currentFmt == 0 && (curExt == ".md")) {
+                        inputName = inputName.substr(0, dotPos) + ".html";
+                    } else if (currentFmt == 1 && (curExt == ".html" || curExt == ".htm")) {
+                        inputName = inputName.substr(0, dotPos) + ".md";
+                    }
+                }
+            }
+
+            delwin(win);
+            filePath = inputName;
+            formatType = currentFmt;
+            return true;
+        }
+
+        if (focusField == 0) {
+            if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+                if (!inputName.empty()) inputName.pop_back();
+            } else if (ch >= 32 && ch <= 126) {
+                inputName.push_back(static_cast<char>(ch));
+            }
+        }
+    }
+}
+
 bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace) {
     int width = 58;
     int height = 11;
@@ -333,12 +516,12 @@ void showAboutModal() {
 
     mvwprintw(win, 1, (width - 15) / 2, "MicroWriter TUI");
     mvwprintw(win, 3, 3, "F1: Help F2: New Tab F3: Cycle Tabs");
-    mvwprintw(win, 4, 3, "F4: Find/Replace F5: Rich Layout F6: Code Layout");
-    mvwprintw(win, 5, 3, "F7: Open File F8/Ctrl+S: Save F10: Export ODF");
+    mvwprintw(win, 4, 3, "F4/Ctrl+F: Find/Replace F5: Rich Layout F6: Code");
+    mvwprintw(win, 5, 3, "F7/Ctrl+O: Open F8/Ctrl+S: Save F10: Export ODF");
     mvwprintw(win, 6, 3, "F11: Menu Bar F12/Ctrl+Q: Quit");
 
     mvwprintw(win, 8, 3, "Ctrl+X: Cut Ctrl+C: Copy Ctrl+V: Paste");
-    mvwprintw(win, 9, 3, "Ctrl+A: Select All Ctrl+D: Cut Line Ctrl+E: Undo");
+    mvwprintw(win, 9, 3, "Ctrl+A: Select All Ctrl+D: Cut Line Ctrl+Z/Ctrl+E: Undo");
     mvwprintw(win, 10, 3, "Ctrl+R: Redo Tab: 4-Spaces Indent");
 
     mvwprintw(win, 12, 3, "Tabs: Double-click = New Tab, Right-click = Close Menu");

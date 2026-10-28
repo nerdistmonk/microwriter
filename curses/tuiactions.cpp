@@ -188,6 +188,78 @@ void handleInsertTable(EditorDocument &doc) {
     doc.modified = true;
 }
 
+void handleInsertBulletList(EditorDocument &doc) {
+    doc.pushUndo();
+
+    int startLine = doc.cursor.line;
+    int endLine = doc.cursor.line;
+    if (doc.hasSelection) {
+        startLine = std::min(doc.selectionAnchor.line, doc.cursor.line);
+        endLine = std::max(doc.selectionAnchor.line, doc.cursor.line);
+    }
+
+    startLine = std::clamp(startLine, 0, static_cast<int>(doc.lines.size()) - 1);
+    endLine = std::clamp(endLine, 0, static_cast<int>(doc.lines.size()) - 1);
+
+    for (int i = startLine; i <= endLine; ++i) {
+        std::string &l = doc.lines[i];
+        if (l.rfind("• ", 0) == 0) {
+            l.erase(0, std::string("• ").length());
+        } else if (l.rfind("- ", 0) == 0 || l.rfind("* ", 0) == 0) {
+            l.erase(0, 2);
+            l.insert(0, "• ");
+        } else {
+            l.insert(0, "• ");
+        }
+    }
+
+    doc.cursor.col = static_cast<int>(doc.lines[doc.cursor.line].length());
+    doc.hasSelection = false;
+    doc.modified = true;
+}
+
+void handleInsertNumberedList(EditorDocument &doc) {
+    doc.pushUndo();
+
+    int startLine = doc.cursor.line;
+    int endLine = doc.cursor.line;
+    if (doc.hasSelection) {
+        startLine = std::min(doc.selectionAnchor.line, doc.cursor.line);
+        endLine = std::max(doc.selectionAnchor.line, doc.cursor.line);
+    }
+
+    startLine = std::clamp(startLine, 0, static_cast<int>(doc.lines.size()) - 1);
+    endLine = std::clamp(endLine, 0, static_cast<int>(doc.lines.size()) - 1);
+
+    int num = 1;
+    for (int i = startLine; i <= endLine; ++i) {
+        std::string &l = doc.lines[i];
+        // Strip existing number prefix if present
+        size_t dotPos = l.find(". ");
+        if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+            bool allDigits = true;
+            for (size_t d = 0; d < dotPos; ++d) {
+                if (!std::isdigit(static_cast<unsigned char>(l[d]))) {
+                    allDigits = false;
+                    break;
+                }
+            }
+            if (allDigits) {
+                l.erase(0, dotPos + 2);
+            }
+        } else if (l.rfind("• ", 0) == 0) {
+            l.erase(0, std::string("• ").length());
+        }
+
+        std::string prefix = std::to_string(num++) + ". ";
+        l.insert(0, prefix);
+    }
+
+    doc.cursor.col = static_cast<int>(doc.lines[doc.cursor.line].length());
+    doc.hasSelection = false;
+    doc.modified = true;
+}
+
 void handleDeleteSelection(EditorDocument &doc) {
     if (!doc.hasSelection) return;
 

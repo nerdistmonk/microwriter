@@ -9,6 +9,8 @@ namespace TuiDialogs {
     int showListSelectionModal(const std::string &title, const std::vector<std::string> &items);
     void showAboutModal();
     bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace);
+    int showConfirmModal(const std::string &title, const std::string &message); // 1 = Save/Yes, 2 = Discard/No, 0 = Cancel
+    bool showSaveAsModal(std::string &filePath, int &formatType); // formatType: 0 = HTML (.html), 1 = Markdown (.md)
     int showRegexCheatSheetModal(std::string &outFind, std::string &outReplace);
     int showHtmlCheatSheetModal(std::string &outTag);
     int showSedUtilsCheatSheetModal(std::string &outSnippet);
