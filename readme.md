@@ -2,16 +2,14 @@
 
 **The diet soda of word processors, same refreshing taste, half the calories!**
 
-**Version 2.0, released on October 27th, 2026**
+**Version 2.5B, released on October 28th, 2026**
 
-**\******A lightweight, distraction-free rich text editor and code notepad built
-with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with
-essential word processing tools, multi-tab editing, and versatile document
-export capabilities. *******
+**\********A lightweight, distraction-free rich text editor and code notepad
+built with C++ and Qt. MicroWriter combines the simplicity of a classic notepad
+with essential word processing tools, multi-tab editing, and versatile document
+export capabilities. *********
 
-<img src="shot.png" width="621" height="338" />** <img src="shot2.png" width="623" height="340" />**
-
-<img src="shot3.png" width="851" height="470" />
+<img src="shot.png" width="621" height="338" />**\** <img src="shot2.png" width="623" height="340" />\**<img src="shot3.png" width="851" height="470" />**
 
 - - -
 ## Features
@@ -60,7 +58,7 @@ export capabilities. *******
 |Shortcut                       |Action          |
 |-------------------------------|----------------|
 |`Ctrl + Z`                     |**Undo**        |
-|`Ctrl + Y`**\** / `Ctrl + Shift + Z`\*\***|**Redo**        |
+|`Ctrl + Y`**\** / `Ctrl + Shift + Z`\****|**Redo**        |
 |`Ctrl + X`                     |**Cut**         |
 |`Ctrl + C`                     |**Copy**        |
 |`Ctrl + V`                     |**Paste**       |
@@ -133,7 +131,7 @@ export capabilities. *******
 |**Ctrl + E**             |**Undo**                                             |
 |**Ctrl + R**             |**Redo**                                             |
 |**Tab**                  |**Indent 4 Spaces / Block Indent Selection**         |
-|**Shift + Tab\** (Backtab)****|**Unindent Line / Selection**                        |
+|***Shift + Tab* (Backtab)*\*****|**Unindent Line / Selection**                        |
 
 ### Navigation & Dialogs
 
@@ -178,15 +176,8 @@ export capabilities. *******
 
 **cmake --build .**
 
-**To run the TUI editor:**
-
-**./microwriter -c**
-
-**Command-Line Usage**
-
-**Launch directly into the console TUI or force code editing mode:**
-
-**\# Launch in terminal mode**
+- - -
+**\# Launch directly into the console TUI or force code editing mode:**
 
 **microwriter -c \[file1] \[file2] ...**
 
