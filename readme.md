@@ -2,7 +2,7 @@
 
 **The diet soda of word processors, same refreshing taste, half the calories!**
 
-**Version 2.5, released on October 27th, 2026**
+**Version 2.0, released on October 27th, 2026**
 
 **\******A lightweight, distraction-free rich text editor and code notepad built
 with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with
@@ -11,13 +11,13 @@ export capabilities. *******
 
 <img src="shot.png" width="621" height="338" />** <img src="shot2.png" width="623" height="340" />**
 
+<img src="shot3.png" width="851" height="470" />
+
 - - -
 ## Features
 
 - **Multi-Tab Interface: Work on multiple documents simultaneously with per-tab
   layout memory.**
-- **Features a dual GUI design, a QT6 frontend while also sporting an ncurses
-  based frontend that is on feature parity with the QT6 version.**
 - **Rich Text Formatting: Bold, italic, underline, strikethrough, text color,
   highlight color, font family, and font size.**
 - **Four Layout Modes: Switch seamlessly between Normal, Web, Print, and Code
@@ -92,39 +92,7 @@ export capabilities. *******
 |`Ctrl + R`      |**Align Right**|
 |`Ctrl + J`      |**Justify**  |
 
-```bash
-# MicroWriter TUI
-```
-**The diet soda of word processors, now in a refreshing display server free
-flavor!**
-
-**A lightweight, distraction-free terminal text editor and code notepad built
-with C++ and ncurses. MicroWriter TUI provides complete terminal parity with
-the Qt6 GUI version, combining snappy multi-tab editing, rich text markup
-tools, dedicated code development features, and native Wayland/X11 clipboard
-interoperability.<img src="shot3.png" width="773" height="427" />**
-
-- - -
-## Command-Line Usage
-
-**Launch directly into the console TUI or force code editing mode:**
-
-**\# Launch in terminal mode**
-
-**microwriter -c \[file1] \[file2] ...**
-
-**microwriter --console \[file1] \[file2] ...**
-
-**\# Launch directly in Code Layout mode**
-
-**microwriter -C \[file1] \[file2] ...**
-
-**microwriter --code \[file1] \[file2] ...**
-
-***(Running without console flags opens the standard Qt6 GUI version).***
-
-- - -
-## Keyboard Shortcuts
+**Keyboard Shortcuts for TUI Version**
 
 ### Function Key System (F1 – F12)
 
@@ -191,9 +159,9 @@ interoperability.<img src="shot3.png" width="773" height="427" />**
 |**Click**   |**Gutter (Code Mode)**|**Select entire line**                               |
 |**Mouse Wheel**|**Editor / Dialogs**|**Scroll document viewport or modal lists smoothly** |
 
-- - -
-## Build Requirements
-
+```bash
+**Build Requirements**
+```
 - **C++17 compatible compiler (GCC or Clang)**
 - **CMake 3.16 or higher**
 - **ncurses library (with wide-character/mouse support)**
@@ -213,4 +181,22 @@ interoperability.<img src="shot3.png" width="773" height="427" />**
 **To run the TUI editor:**
 
 **./microwriter -c**
+
+**Command-Line Usage**
+
+**Launch directly into the console TUI or force code editing mode:**
+
+**\# Launch in terminal mode**
+
+**microwriter -c \[file1] \[file2] ...**
+
+**microwriter --console \[file1] \[file2] ...**
+
+**\# Launch directly in Code Layout mode**
+
+**microwriter -C \[file1] \[file2] ...**
+
+**microwriter --code \[file1] \[file2] ...**
+
+***(Running without console flags opens the standard Qt6 GUI version).***
 
