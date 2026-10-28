@@ -1,0 +1,366 @@
+#include "tuidialogs.h"
+#include <curses.h>
+#include <algorithm>
+#include <string>
+#include <vector>
+
+namespace TuiDialogs {
+
+std::string showPromptModal(const std::string &prompt) {
+    int width = 54;
+    int height = 5;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+    box(win, 0, 0);
+
+    mvwprintw(win, 1, 2, "%s", prompt.c_str());
+
+    std::string input;
+    int maxLen = width - 6;
+
+    while (true) {
+        wmove(win, 2, 2);
+        wclrtoeol(win);
+        wborder(win, 0, 0, 0, 0, 0, 0, 0, 0);
+
+        int displayOffset = 0;
+        if (static_cast<int>(input.length()) > maxLen) {
+            displayOffset = static_cast<int>(input.length()) - maxLen;
+        }
+
+        std::string visibleText = input.substr(displayOffset, maxLen);
+        mvwprintw(win, 2, 2, "%s", visibleText.c_str());
+        wmove(win, 2, 2 + static_cast<int>(visibleText.length()));
+        wrefresh(win);
+
+        int ch = wgetch(win);
+
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            getmouse(&ev);
+            continue;
+        }
+
+        if (ch == 27) {
+            delwin(win);
+            return "";
+        }
+
+        if (ch == 10 || ch == KEY_ENTER) {
+            delwin(win);
+            return input;
+        }
+
+        if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+            if (!input.empty()) {
+                input.pop_back();
+            }
+            continue;
+        }
+
+        if (ch >= 32 && ch <= 126) {
+            input.push_back(static_cast<char>(ch));
+        }
+    }
+}
+
+int showListSelectionModal(const std::string &title, const std::vector<std::string> &items) {
+    int maxItemLen = static_cast<int>(title.length());
+    for (const auto &item : items) {
+        if (static_cast<int>(item.length()) > maxItemLen) {
+            maxItemLen = static_cast<int>(item.length());
+        }
+    }
+    int width = std::max(56, std::min(COLS - 4, maxItemLen + 6));
+    int maxVisible = std::max(4, std::min(14, LINES - 6));
+    int height = maxVisible + 4;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+
+    int selected = 0;
+    int scrollOffset = 0;
+
+    while (true) {
+        werase(win);
+        box(win, 0, 0);
+
+        mvwprintw(win, 1, (width - static_cast<int>(title.length())) / 2, "%s", title.c_str());
+
+        if (selected < scrollOffset) {
+            scrollOffset = selected;
+        } else if (selected >= scrollOffset + maxVisible) {
+            scrollOffset = selected - maxVisible + 1;
+        }
+
+        for (int row = 0; row < maxVisible; ++row) {
+            int itemIdx = scrollOffset + row;
+            if (itemIdx >= static_cast<int>(items.size())) break;
+
+            if (itemIdx == selected) wattron(win, A_REVERSE);
+            std::string itemText = items[itemIdx];
+            if (static_cast<int>(itemText.length()) > width - 6) {
+                itemText = itemText.substr(0, width - 9) + "...";
+            }
+            mvwprintw(win, 2 + row, 2, "%-*s", width - 4, itemText.c_str());
+            if (itemIdx == selected) wattroff(win, A_REVERSE);
+        }
+
+        if (scrollOffset > 0) mvwaddch(win, 1, width - 2, '^');
+        if (scrollOffset + maxVisible < static_cast<int>(items.size())) mvwaddch(win, height - 2, width - 2, 'v');
+
+        wrefresh(win);
+        int ch = wgetch(win);
+
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            if (getmouse(&ev) == OK) {
+                if (ev.bstate & 0x10000) { // Wheel up
+                    if (selected > 0) selected--;
+                    continue;
+                }
+                if (ev.bstate & 0x200000) { // Wheel down
+                    if (selected + 1 < static_cast<int>(items.size())) selected++;
+                    continue;
+                }
+                if (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED)) {
+                    int clickedRow = ev.y - startY - 2;
+                    if (clickedRow >= 0 && clickedRow < maxVisible) {
+                        int itemIdx = scrollOffset + clickedRow;
+                        if (itemIdx < static_cast<int>(items.size())) {
+                            delwin(win);
+                            return itemIdx;
+                        }
+                    }
+                }
+            }
+            continue;
+        }
+
+        if (ch == KEY_UP && selected > 0) {
+            selected--;
+        } else if (ch == KEY_DOWN && selected + 1 < static_cast<int>(items.size())) {
+            selected++;
+        } else if (ch == KEY_PPAGE) {
+            selected = std::max(0, selected - maxVisible);
+        } else if (ch == KEY_NPAGE) {
+            selected = std::min(static_cast<int>(items.size()) - 1, selected + maxVisible);
+        } else if (ch == 10 || ch == KEY_ENTER) {
+            delwin(win);
+            return selected;
+        } else if (ch == 27) {
+            delwin(win);
+            return -1;
+        }
+    }
+}
+
+void showAboutModal() {
+    int width = 62;
+    int height = 19;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+    box(win, 0, 0);
+
+    mvwprintw(win, 1, (width - 15) / 2, "MicroWriter TUI");
+    mvwprintw(win, 3, 3, "F1: Help          F2: New Tab       F3: Cycle Tabs");
+    mvwprintw(win, 4, 3, "F4: Find/Replace  F5: Rich Layout   F6: Code Layout");
+    mvwprintw(win, 5, 3, "F7: Open File     F8/Ctrl+S: Save   F9: Export PDF");
+    mvwprintw(win, 6, 3, "F10: Export ODF   F11: Menu Bar     F12/Ctrl+Q: Quit");
+
+    mvwprintw(win, 8, 3, "Ctrl+X: Cut       Ctrl+C: Copy      Ctrl+V: Paste");
+    mvwprintw(win, 9, 3, "Ctrl+A: Select All Ctrl+D: Cut Line Ctrl+E: Undo");
+    mvwprintw(win, 10, 3, "Ctrl+R: Redo      Tab: 4-Spaces Indent");
+
+    mvwprintw(win, 12, 3, "Tabs: Double-click = New Tab, Right-click = Close Menu");
+    mvwprintw(win, 13, 3, "Clipboard: Native wl-copy / xclip bidirectional sync");
+    mvwprintw(win, 14, 3, "Navigation: Arrows, PgUp, PgDn, Home, End");
+    mvwprintw(win, 15, 3, "Cancel    : Esc cancels prompts/menus");
+
+    mvwprintw(win, 17, (width - 24) / 2, "[ Press Esc or Any Key ]");
+
+    wrefresh(win);
+
+    while (true) {
+        int ch = wgetch(win);
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            getmouse(&ev);
+            continue;
+        }
+        break;
+    }
+
+    delwin(win);
+}
+
+int showRegexCheatSheetModal(std::string &outFind, std::string &outReplace) {
+    struct PatternItem {
+        std::string desc;
+        std::string find;
+        std::string rep;
+    };
+    static const std::vector<PatternItem> patterns = {
+        {"Cut everything after char 'r'", "(r).*", "$1"},
+        {"Cut everything before 'Ska'", ".*(Ska)", "$1"},
+        {"Keep characters inside quotes", "\"([^\"]*)\"", "$1"},
+        {"Remove all digits / numbers", "\\d+", ""},
+        {"Remove leading whitespace", "^[ \\t]+", ""},
+        {"Remove trailing whitespace", "[ \\t]+$", ""},
+        {"Multiple spaces to single space", "[ \\t]+", " "},
+        {"Extract email addresses", "([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+)", "$1"},
+        {"Convert Markdown headers (# )", "^#+\\s*(.*)$", "$1"}
+    };
+
+    std::vector<std::string> displayList;
+    for (const auto &p : patterns) {
+        displayList.push_back(p.desc + " | " + p.find);
+    }
+
+    int sel = showListSelectionModal("Regex Patterns (Enter to Load)", displayList);
+    if (sel >= 0 && sel < static_cast<int>(patterns.size())) {
+        outFind = patterns[sel].find;
+        outReplace = patterns[sel].rep;
+        return sel;
+    }
+    return -1;
+}
+
+int showHtmlCheatSheetModal(std::string &outTag) {
+    struct TagItem {
+        std::string desc;
+        std::string tag;
+    };
+    static const std::vector<TagItem> snippets = {
+        {"Paragraph", "<p></p>"},
+        {"Heading 1", "<h1></h1>"},
+        {"Heading 2", "<h2></h2>"},
+        {"Bold text", "<b></b>"},
+        {"Italic text", "<i></i>"},
+        {"Anchor / Link", "<a href=\"\"></a>"},
+        {"Image element", "<img src=\"\" alt=\"\" />"},
+        {"Unordered List", "<ul>\n  <li></li>\n</ul>"},
+        {"Ordered List", "<ol>\n  <li></li>\n</ol>"},
+        {"Blockquote", "<blockquote></blockquote>"},
+        {"Inline Code", "<code></code>"},
+        {"Code Block", "<pre><code></code></pre>"},
+        {"Horizontal Rule", "<hr />"}
+    };
+
+    std::vector<std::string> displayList;
+    for (const auto &s : snippets) {
+        displayList.push_back(s.desc + " -> " + s.tag);
+    }
+
+    int sel = showListSelectionModal("HTML Snippets (Enter to Insert)", displayList);
+    if (sel >= 0 && sel < static_cast<int>(snippets.size())) {
+        outTag = snippets[sel].tag;
+        return sel;
+    }
+    return -1;
+}
+
+int showSedUtilsCheatSheetModal(std::string &outSnippet) {
+    struct SedItem {
+        std::string desc;
+        std::string cmd;
+    };
+    static const std::vector<SedItem> items = {
+        {"sed: Replace first occurrence per line", "sed 's/foo/bar/' file.txt"},
+        {"sed: Global search and replace", "sed 's/foo/bar/g' file.txt"},
+        {"sed: In-place file replace", "sed -i 's/foo/bar/g' file.txt"},
+        {"sed: Delete empty lines", "sed '/^$/d' file.txt"},
+        {"sed: Delete lines matching pattern", "sed '/pattern/d' file.txt"},
+        {"sed: Print specific line numbers (e.g. 5-10)", "sed -n '5,10p' file.txt"},
+        {"awk: Print specific column (col 1)", "awk '{print $1}' file.txt"},
+        {"awk: Sum values in column 1", "awk '{s+=$1} END {print s}' file.txt"},
+        {"cut: Extract delimiter separated fields (CSV)", "cut -d',' -f1,3 file.csv"},
+        {"grep: Recursive case-insensitive with line numbers", "grep -rnI 'search_term' ."},
+        {"tr: Translate uppercase to lowercase", "cat file.txt | tr '[:upper:]' '[:lower:]'"},
+        {"xargs: Parallel command execution (4 jobs)", "cat files.txt | xargs -n 1 -P 4 command"}
+    };
+
+    std::vector<std::string> displayList;
+    for (const auto &it : items) {
+        displayList.push_back(it.desc + " | " + it.cmd);
+    }
+
+    int sel = showListSelectionModal("Sed & Unix Utilities Cheat Sheet (Enter to Insert)", displayList);
+    if (sel >= 0 && sel < static_cast<int>(items.size())) {
+        outSnippet = items[sel].cmd;
+        return sel;
+    }
+    return -1;
+}
+
+int showBashScriptCheatSheetModal(std::string &outScript) {
+    struct ScriptItem {
+        std::string title;
+        std::string code;
+    };
+    static const std::vector<ScriptItem> scripts = {
+        {
+            "Strict Mode Boilerplate (set -euo pipefail)",
+            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n    echo \"Starting script...\"\n}\nmain \"$@\"\n"
+        },
+        {
+            "CLI Option & Argument Parser (getopts)",
+            "while getopts \":f:h\" opt; do\n  case ${opt} in\n    f ) FILE=\"$OPTARG\" ;;\n    h ) echo \"Usage: $0 [-f file]\"; exit 0 ;;\n    \\? ) echo \"Invalid Option: -$OPTARG\" 1>&2; exit 1 ;;\n  esac\ndone\n"
+        },
+        {
+            "Traverse Directory & Loop Over Files Safe",
+            "while IFS= read -r -d '' file; do\n    echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
+        },
+        {
+            "Temporary Directory with Auto-Cleanup Trap",
+            "TMP_DIR=$(mktemp -d)\ntrap 'rm -rf \"$TMP_DIR\"' EXIT INT TERM\necho \"Using temporary directory: $TMP_DIR\"\n"
+        },
+        {
+            "Check Command Existence / Prerequisite Guard",
+            "command -v jq >/dev/null 2>&1 || { echo \"Error: 'jq' is required but not installed.\" >&2; exit 1; }\n"
+        },
+        {
+            "Prompt User for Confirmation (y/N)",
+            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n    [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n    *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
+        }
+    };
+
+    std::vector<std::string> displayList;
+    for (const auto &s : scripts) {
+        displayList.push_back(s.title);
+    }
+
+    int sel = showListSelectionModal("Useful Bash Scripts (Enter to Insert)", displayList);
+    if (sel >= 0 && sel < static_cast<int>(scripts.size())) {
+        outScript = scripts[sel].code;
+        return sel;
+    }
+    return -1;
+}
+
+int showTabContextMenuModal(const std::string &tabTitle) {
+    std::vector<std::string> options = {
+        "Save File",
+        "Close Tab",
+        "Save and Close Tab",
+        "Cancel"
+    };
+    int sel = showListSelectionModal("Tab: " + tabTitle, options);
+    if (sel == 0) return 1; // Save
+    if (sel == 1) return 2; // Close
+    if (sel == 2) return 3; // Save & Close
+    return 0; // Cancel
+}
+
+} // namespace TuiDialogs
