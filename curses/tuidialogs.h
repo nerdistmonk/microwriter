@@ -8,6 +8,7 @@ namespace TuiDialogs {
     std::string showPromptModal(const std::string &prompt);
     int showListSelectionModal(const std::string &title, const std::vector<std::string> &items);
     void showAboutModal();
+    bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace);
     int showRegexCheatSheetModal(std::string &outFind, std::string &outReplace);
     int showHtmlCheatSheetModal(std::string &outTag);
     int showSedUtilsCheatSheetModal(std::string &outSnippet);

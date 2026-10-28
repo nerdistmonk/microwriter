@@ -188,6 +188,45 @@ void handleInsertTable(EditorDocument &doc) {
     doc.modified = true;
 }
 
+void handleDeleteSelection(EditorDocument &doc) {
+    if (!doc.hasSelection) return;
+
+    doc.pushUndo();
+
+    TextPosition start = doc.selectionAnchor;
+    TextPosition end = doc.cursor;
+    if (end < start) std::swap(start, end);
+
+    int totalLines = static_cast<int>(doc.lines.size());
+    if (totalLines == 0) {
+        doc.lines = {""};
+        doc.cursor = {0, 0};
+        doc.hasSelection = false;
+        return;
+    }
+
+    start.line = std::clamp(start.line, 0, totalLines - 1);
+    end.line = std::clamp(end.line, 0, totalLines - 1);
+    start.col = std::clamp(start.col, 0, static_cast<int>(doc.lines[start.line].length()));
+    end.col = std::clamp(end.col, 0, static_cast<int>(doc.lines[end.line].length()));
+
+    if (start.line == end.line) {
+        doc.lines[start.line].erase(start.col, end.col - start.col);
+    } else {
+        std::string merged = doc.lines[start.line].substr(0, start.col) + doc.lines[end.line].substr(end.col);
+        doc.lines[start.line] = merged;
+        doc.lines.erase(doc.lines.begin() + start.line + 1, doc.lines.begin() + end.line + 1);
+    }
+
+    if (doc.lines.empty()) {
+        doc.lines.push_back("");
+    }
+
+    doc.cursor = start;
+    doc.hasSelection = false;
+    doc.modified = true;
+}
+
 void handleCutCopy(EditorDocument &doc, bool isCut) {
     if (!doc.hasSelection) {
         s_clipboard = doc.lines[doc.cursor.line] + "\n";
@@ -247,6 +286,32 @@ void handlePaste(EditorDocument &doc) {
 
     doc.pushUndo();
 
+    // If text is currently highlighted/selected, erase the selection first
+    if (doc.hasSelection) {
+        TextPosition start = doc.selectionAnchor;
+        TextPosition end = doc.cursor;
+        if (end < start) std::swap(start, end);
+
+        int totalLines = static_cast<int>(doc.lines.size());
+        if (totalLines > 0) {
+            start.line = std::clamp(start.line, 0, totalLines - 1);
+            end.line = std::clamp(end.line, 0, totalLines - 1);
+            start.col = std::clamp(start.col, 0, static_cast<int>(doc.lines[start.line].length()));
+            end.col = std::clamp(end.col, 0, static_cast<int>(doc.lines[end.line].length()));
+
+            if (start.line == end.line) {
+                doc.lines[start.line].erase(start.col, end.col - start.col);
+            } else {
+                std::string merged = doc.lines[start.line].substr(0, start.col) + doc.lines[end.line].substr(end.col);
+                doc.lines[start.line] = merged;
+                doc.lines.erase(doc.lines.begin() + start.line + 1, doc.lines.begin() + end.line + 1);
+            }
+        }
+        if (doc.lines.empty()) doc.lines.push_back("");
+        doc.cursor = start;
+        doc.hasSelection = false;
+    }
+
     std::stringstream ss(clip);
     std::string line;
     std::vector<std::string> pasteLines;
@@ -294,6 +359,51 @@ void handleRedo(EditorDocument &doc) {
     doc.modified = true;
 }
 
+static bool findNextRegex(EditorDocument &doc, const std::string &findStr, size_t fromLine, size_t fromCol) {
+    bool isRegex = true;
+    std::regex reg;
+    try {
+        reg = std::regex(findStr, std::regex::ECMAScript | std::regex::icase);
+    } catch (...) {
+        isRegex = false;
+    }
+
+    for (size_t i = fromLine; i < doc.lines.size(); ++i) {
+        size_t startCol = (i == fromLine) ? fromCol : 0;
+        const std::string &line = doc.lines[i];
+        if (startCol > line.length()) continue;
+
+        if (isRegex) {
+            std::smatch m;
+            std::string sub = line.substr(startCol);
+            if (std::regex_search(sub, m, reg)) {
+                size_t matchPos = startCol + m.position(0);
+                size_t matchLen = m.length(0);
+                if (doc.mode != TuiMode::RichText || !rangeOverlapsTag(line, matchPos, matchLen)) {
+                    doc.selectionAnchor = {static_cast<int>(i), static_cast<int>(matchPos)};
+                    doc.cursor.line = static_cast<int>(i);
+                    doc.cursor.col = static_cast<int>(matchPos + matchLen);
+                    doc.hasSelection = true;
+                    return true;
+                }
+            }
+        } else {
+            size_t pos = line.find(findStr, startCol);
+            while (pos != std::string::npos) {
+                if (doc.mode != TuiMode::RichText || !rangeOverlapsTag(line, pos, findStr.length())) {
+                    doc.selectionAnchor = {static_cast<int>(i), static_cast<int>(pos)};
+                    doc.cursor.line = static_cast<int>(i);
+                    doc.cursor.col = static_cast<int>(pos + findStr.length());
+                    doc.hasSelection = true;
+                    return true;
+                }
+                pos = line.find(findStr, pos + 1);
+            }
+        }
+    }
+    return false;
+}
+
 static bool replaceNextRegex(EditorDocument &doc, const std::string &findStr, const std::string &replStr, size_t fromLine, size_t fromCol) {
     bool isRegex = true;
     std::regex reg;
@@ -322,6 +432,7 @@ static bool replaceNextRegex(EditorDocument &doc, const std::string &findStr, co
                     doc.lines[i].replace(matchPos, matchLen, replacedPiece);
                     doc.cursor.line = static_cast<int>(i);
                     doc.cursor.col = static_cast<int>(matchPos + replacedPiece.length());
+                    doc.hasSelection = false;
                     doc.modified = true;
                     return true;
                 }
@@ -334,6 +445,7 @@ static bool replaceNextRegex(EditorDocument &doc, const std::string &findStr, co
                     doc.lines[i].replace(pos, findStr.length(), replStr);
                     doc.cursor.line = static_cast<int>(i);
                     doc.cursor.col = static_cast<int>(pos + replStr.length());
+                    doc.hasSelection = false;
                     doc.modified = true;
                     return true;
                 }
@@ -345,24 +457,42 @@ static bool replaceNextRegex(EditorDocument &doc, const std::string &findStr, co
 }
 
 void handleFindReplace(EditorDocument &doc, const std::string &initFind, const std::string &initReplace) {
-    std::string promptFind = initFind.empty() ? "Find (string or regex): " : "Find [" + initFind + "]: ";
-    std::string findStr = TuiDialogs::showPromptModal(promptFind);
-    if (findStr.empty()) {
-        if (!initFind.empty()) findStr = initFind;
-        else return;
+    static std::string lastFind;
+    static std::string lastReplace;
+    static bool lastDoReplace = false;
+
+    std::string findStr = !initFind.empty() ? initFind : lastFind;
+    std::string replaceStr = !initReplace.empty() ? initReplace : lastReplace;
+    bool doReplace = !initReplace.empty() ? true : lastDoReplace;
+
+    if (!initFind.empty()) {
+        // Direct invocation (e.g., from cheat sheets)
+        doReplace = !initReplace.empty();
+    } else {
+        // Modal dialog with toggleable replace checkbox
+        if (!TuiDialogs::showFindReplaceModal(findStr, replaceStr, doReplace)) {
+            return;
+        }
     }
 
-    std::string promptRep = initReplace.empty() ? "Replace with: " : "Replace with [" + initReplace + "]: ";
-    std::string replStr = TuiDialogs::showPromptModal(promptRep);
-    if (replStr.empty() && !initReplace.empty()) {
-        replStr = initReplace;
-    }
+    if (findStr.empty()) return;
+
+    lastFind = findStr;
+    lastReplace = replaceStr;
+    lastDoReplace = doReplace;
 
     size_t curLine = static_cast<size_t>(std::max(0, doc.cursor.line));
     size_t curCol = static_cast<size_t>(std::max(0, doc.cursor.col));
 
-    if (!replaceNextRegex(doc, findStr, replStr, curLine, curCol)) {
-        replaceNextRegex(doc, findStr, replStr, 0, 0);
+    if (doReplace) {
+        if (!replaceNextRegex(doc, findStr, replaceStr, curLine, curCol)) {
+            replaceNextRegex(doc, findStr, replaceStr, 0, 0);
+        }
+    } else {
+        // Find-only mode: Highlight match and navigate to it without modifying text
+        if (!findNextRegex(doc, findStr, curLine, curCol)) {
+            findNextRegex(doc, findStr, 0, 0);
+        }
     }
 }
 
@@ -429,7 +559,7 @@ void handleToggleComment(EditorDocument &doc) {
             size_t first = l.find_first_not_of(" \t");
             if (first != std::string::npos && l.compare(first, trimmedMarker.length(), trimmedMarker) == 0) {
                 size_t len = (first + marker.length() <= l.length() && l.compare(first, marker.length(), marker) == 0)
-                             ? marker.length() : trimmedMarker.length();
+                    ? marker.length() : trimmedMarker.length();
                 l.erase(first, len);
             }
         } else {

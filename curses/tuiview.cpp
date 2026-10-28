@@ -9,7 +9,7 @@
 namespace TuiView {
 
 const std::vector<std::string> toolbarButtons = {
-    "Save", "PDF", "Open", "Font", "Size", "Bold", "Italic"
+    "Save", "Open", "Font", "Size", "Bold", "Italic"
 };
 
 const std::vector<std::string> codeButtons = {
@@ -253,13 +253,19 @@ void render(
     }
 
     mvprintw(LINES - 1, 1, "Mode: %s | L:%d C:%d | W:%zu C:%zu | %s | %s | F1:Help F8/Ctrl+S:Save F11:Menu F12:Quit",
-        doc.mode == TuiMode::RichText ? "Rich" : "Code",
-        doc.cursor.line + 1, doc.cursor.col + 1, words, chars,
-        doc.encoding.c_str(), doc.eolFormat.c_str());
+             doc.mode == TuiMode::RichText ? "Rich" : "Code",
+             doc.cursor.line + 1, doc.cursor.col + 1, words, chars,
+             doc.encoding.c_str(), doc.eolFormat.c_str());
     attroff(COLOR_PAIR(2));
 
-    // Place physical terminal cursor
-    move(contentTop + (doc.cursor.line - scrollLine), lineNumWidth + doc.cursor.col);
+    // Place physical terminal cursor if within visible viewport
+    int screenCursorY = contentTop + (doc.cursor.line - scrollLine);
+    if (screenCursorY >= contentTop && screenCursorY < contentTop + contentHeight) {
+        curs_set(1);
+        move(screenCursorY, lineNumWidth + doc.cursor.col);
+    } else {
+        curs_set(0);
+    }
     refresh();
 }
 

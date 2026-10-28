@@ -6,6 +6,27 @@
 
 namespace TuiDialogs {
 
+static void drawDialogBorder(WINDOW *win, int height, int width) {
+    // Explicit UTF-8 box characters: ┌ ─ ┐ │ └ ─ ┘
+    // Bypasses VT100 alternate charset translation to prevent 'q' and 'x' characters
+    mvwprintw(win, 0, 0, "\xe2\x94\x8c"); // ┌
+    for (int i = 1; i < width - 1; ++i) {
+        wprintw(win, "\xe2\x94\x80");     // ─
+    }
+    wprintw(win, "\xe2\x94\x90");         // ┐
+
+    for (int y = 1; y < height - 1; ++y) {
+        mvwprintw(win, y, 0, "\xe2\x94\x82");         // │
+        mvwprintw(win, y, width - 1, "\xe2\x94\x82"); // │
+    }
+
+    mvwprintw(win, height - 1, 0, "\xe2\x94\x94"); // └
+    for (int i = 1; i < width - 1; ++i) {
+        wprintw(win, "\xe2\x94\x80");              // ─
+    }
+    wprintw(win, "\xe2\x94\x98");                  // ┘
+}
+
 std::string showPromptModal(const std::string &prompt) {
     int width = 54;
     int height = 5;
@@ -15,7 +36,7 @@ std::string showPromptModal(const std::string &prompt) {
     WINDOW *win = newwin(height, width, startY, startX);
     wbkgd(win, COLOR_PAIR(6));
     keypad(win, TRUE);
-    box(win, 0, 0);
+    drawDialogBorder(win, height, width);
 
     mvwprintw(win, 1, 2, "%s", prompt.c_str());
 
@@ -25,7 +46,7 @@ std::string showPromptModal(const std::string &prompt) {
     while (true) {
         wmove(win, 2, 2);
         wclrtoeol(win);
-        wborder(win, 0, 0, 0, 0, 0, 0, 0, 0);
+        drawDialogBorder(win, height, width);
 
         int displayOffset = 0;
         if (static_cast<int>(input.length()) > maxLen) {
@@ -68,6 +89,135 @@ std::string showPromptModal(const std::string &prompt) {
     }
 }
 
+bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace) {
+    int width = 58;
+    int height = 11;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+
+    int focusField = 0; // 0 = Find input, 1 = Replace Checkbox, 2 = Replace input
+    std::string findInput = findStr;
+    std::string replaceInput = replaceStr;
+    bool replaceEnabled = doReplace;
+
+    int inputFieldWidth = width - 18;
+
+    while (true) {
+        werase(win);
+        drawDialogBorder(win, height, width);
+
+        mvwprintw(win, 1, (width - 16) / 2, "Find & Replace");
+
+        // Row 3: Find input
+        mvwprintw(win, 3, 3, "Find:    [");
+        int findDispOffset = 0;
+        if (static_cast<int>(findInput.length()) > inputFieldWidth) {
+            findDispOffset = static_cast<int>(findInput.length()) - inputFieldWidth;
+        }
+        std::string dispFind = findInput.substr(findDispOffset, inputFieldWidth);
+        if (focusField == 0) wattron(win, A_REVERSE);
+        mvwprintw(win, 3, 13, "%-*s", inputFieldWidth, dispFind.c_str());
+        if (focusField == 0) wattroff(win, A_REVERSE);
+        wprintw(win, "]");
+
+        // Row 5: Replace checkbox
+        if (focusField == 1) wattron(win, A_REVERSE);
+        mvwprintw(win, 5, 3, "[%c] Enable Replace Mode (Space to toggle)", replaceEnabled ? 'X' : ' ');
+        if (focusField == 1) wattroff(win, A_REVERSE);
+
+        // Row 7: Replace input
+        mvwprintw(win, 7, 3, "Replace: [");
+        if (!replaceEnabled) {
+            wattron(win, A_DIM);
+        } else if (focusField == 2) {
+            wattron(win, A_REVERSE);
+        }
+        int repDispOffset = 0;
+        if (static_cast<int>(replaceInput.length()) > inputFieldWidth) {
+            repDispOffset = static_cast<int>(replaceInput.length()) - inputFieldWidth;
+        }
+        std::string dispRep = replaceEnabled ? replaceInput.substr(repDispOffset, inputFieldWidth) : "(Replace Disabled)";
+        mvwprintw(win, 7, 13, "%-*s", inputFieldWidth, dispRep.c_str());
+        if (!replaceEnabled) {
+            wattroff(win, A_DIM);
+        } else if (focusField == 2) {
+            wattroff(win, A_REVERSE);
+        }
+        wprintw(win, "]");
+
+        // Row 9: Instructions / shortcuts
+        mvwprintw(win, 9, 3, "Tab: Next Field | Enter: %s | Esc: Cancel", replaceEnabled ? "Replace" : "Find Next");
+
+        wrefresh(win);
+        int ch = wgetch(win);
+
+        if (ch == KEY_MOUSE) {
+            MEVENT ev;
+            if (getmouse(&ev) == OK && (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
+                int localY = ev.y - startY;
+                if (localY == 3) focusField = 0;
+                else if (localY == 5) {
+                    focusField = 1;
+                    replaceEnabled = !replaceEnabled;
+                }
+                else if (localY == 7 && replaceEnabled) focusField = 2;
+            }
+            continue;
+        }
+
+        if (ch == 27) { // Escape
+            delwin(win);
+            return false;
+        }
+
+        if (ch == '\t' || ch == KEY_DOWN) {
+            if (focusField == 0) focusField = 1;
+            else if (focusField == 1) focusField = replaceEnabled ? 2 : 0;
+            else focusField = 0;
+            continue;
+        }
+
+        if (ch == KEY_BTAB || ch == KEY_UP) {
+            if (focusField == 2) focusField = 1;
+            else if (focusField == 1) focusField = 0;
+            else focusField = replaceEnabled ? 2 : 1;
+            continue;
+        }
+
+        if (focusField == 1 && ch == ' ') {
+            replaceEnabled = !replaceEnabled;
+            continue;
+        }
+
+        if (ch == 10 || ch == KEY_ENTER) {
+            delwin(win);
+            findStr = findInput;
+            replaceStr = replaceInput;
+            doReplace = replaceEnabled;
+            return !findStr.empty();
+        }
+
+        // Typing into input fields
+        if (focusField == 0) {
+            if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+                if (!findInput.empty()) findInput.pop_back();
+            } else if (ch >= 32 && ch <= 126) {
+                findInput.push_back(static_cast<char>(ch));
+            }
+        } else if (focusField == 2 && replaceEnabled) {
+            if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+                if (!replaceInput.empty()) replaceInput.pop_back();
+            } else if (ch >= 32 && ch <= 126) {
+                replaceInput.push_back(static_cast<char>(ch));
+            }
+        }
+    }
+}
+
 int showListSelectionModal(const std::string &title, const std::vector<std::string> &items) {
     int maxItemLen = static_cast<int>(title.length());
     for (const auto &item : items) {
@@ -88,9 +238,17 @@ int showListSelectionModal(const std::string &title, const std::vector<std::stri
     int selected = 0;
     int scrollOffset = 0;
 
+    #if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
+    const mmask_t wheelUp = BUTTON4_PRESSED;
+    const mmask_t wheelDown = BUTTON5_PRESSED;
+    #else
+    const mmask_t wheelUp = 0x10000;
+    const mmask_t wheelDown = 0x200000;
+    #endif
+
     while (true) {
         werase(win);
-        box(win, 0, 0);
+        drawDialogBorder(win, height, width);
 
         mvwprintw(win, 1, (width - static_cast<int>(title.length())) / 2, "%s", title.c_str());
 
@@ -122,11 +280,11 @@ int showListSelectionModal(const std::string &title, const std::vector<std::stri
         if (ch == KEY_MOUSE) {
             MEVENT ev;
             if (getmouse(&ev) == OK) {
-                if (ev.bstate & 0x10000) { // Wheel up
+                if (ev.bstate & wheelUp) { // Wheel up
                     if (selected > 0) selected--;
                     continue;
                 }
-                if (ev.bstate & 0x200000) { // Wheel down
+                if (ev.bstate & wheelDown) { // Wheel down
                     if (selected + 1 < static_cast<int>(items.size())) selected++;
                     continue;
                 }
@@ -171,22 +329,22 @@ void showAboutModal() {
     WINDOW *win = newwin(height, width, startY, startX);
     wbkgd(win, COLOR_PAIR(6));
     keypad(win, TRUE);
-    box(win, 0, 0);
+    drawDialogBorder(win, height, width);
 
     mvwprintw(win, 1, (width - 15) / 2, "MicroWriter TUI");
-    mvwprintw(win, 3, 3, "F1: Help          F2: New Tab       F3: Cycle Tabs");
-    mvwprintw(win, 4, 3, "F4: Find/Replace  F5: Rich Layout   F6: Code Layout");
-    mvwprintw(win, 5, 3, "F7: Open File     F8/Ctrl+S: Save   F9: Export PDF");
-    mvwprintw(win, 6, 3, "F10: Export ODF   F11: Menu Bar     F12/Ctrl+Q: Quit");
+    mvwprintw(win, 3, 3, "F1: Help F2: New Tab F3: Cycle Tabs");
+    mvwprintw(win, 4, 3, "F4: Find/Replace F5: Rich Layout F6: Code Layout");
+    mvwprintw(win, 5, 3, "F7: Open File F8/Ctrl+S: Save F10: Export ODF");
+    mvwprintw(win, 6, 3, "F11: Menu Bar F12/Ctrl+Q: Quit");
 
-    mvwprintw(win, 8, 3, "Ctrl+X: Cut       Ctrl+C: Copy      Ctrl+V: Paste");
+    mvwprintw(win, 8, 3, "Ctrl+X: Cut Ctrl+C: Copy Ctrl+V: Paste");
     mvwprintw(win, 9, 3, "Ctrl+A: Select All Ctrl+D: Cut Line Ctrl+E: Undo");
-    mvwprintw(win, 10, 3, "Ctrl+R: Redo      Tab: 4-Spaces Indent");
+    mvwprintw(win, 10, 3, "Ctrl+R: Redo Tab: 4-Spaces Indent");
 
     mvwprintw(win, 12, 3, "Tabs: Double-click = New Tab, Right-click = Close Menu");
     mvwprintw(win, 13, 3, "Clipboard: Native wl-copy / xclip bidirectional sync");
     mvwprintw(win, 14, 3, "Navigation: Arrows, PgUp, PgDn, Home, End");
-    mvwprintw(win, 15, 3, "Cancel    : Esc cancels prompts/menus");
+    mvwprintw(win, 15, 3, "Cancel : Esc cancels prompts/menus");
 
     mvwprintw(win, 17, (width - 24) / 2, "[ Press Esc or Any Key ]");
 
@@ -312,7 +470,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
     static const std::vector<ScriptItem> scripts = {
         {
             "Strict Mode Boilerplate (set -euo pipefail)",
-            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n    echo \"Starting script...\"\n}\nmain \"$@\"\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n  echo \"Starting script...\"\n}\nmain \"$@\"\n"
         },
         {
             "CLI Option & Argument Parser (getopts)",
@@ -320,7 +478,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
         },
         {
             "Traverse Directory & Loop Over Files Safe",
-            "while IFS= read -r -d '' file; do\n    echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
+            "while IFS= read -r -d '' file; do\n  echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
         },
         {
             "Temporary Directory with Auto-Cleanup Trap",
@@ -332,7 +490,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
         },
         {
             "Prompt User for Confirmation (y/N)",
-            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n    [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n    *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
+            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n  [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n  *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
         }
     };
 

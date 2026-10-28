@@ -11,6 +11,7 @@ namespace TuiActions {
     void handleColorSelection(EditorDocument &doc);
     void handleInsertTable(EditorDocument &doc);
 
+    void handleDeleteSelection(EditorDocument &doc);
     void handleCutCopy(EditorDocument &doc, bool isCut);
     void handlePaste(EditorDocument &doc);
     void handleUndo(EditorDocument &doc);

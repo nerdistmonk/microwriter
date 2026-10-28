@@ -6,6 +6,7 @@
 #include "tuimenu.h"
 
 #include <curses.h>
+#include <clocale>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -21,6 +22,9 @@ public:
 
     int run(const std::vector<std::string> &initialFiles, bool forceCodeMode = false) {
         m_defaultCodeMode = forceCodeMode;
+
+        // Initialize user locale for proper Unicode/box-drawing character output
+        std::setlocale(LC_ALL, "");
 
         initscr();
         raw();
@@ -100,9 +104,12 @@ private:
 
     void updateScroll() {
         int contentTop = 3;
-        int contentHeight = LINES - contentTop - 1;
-        if (doc().cursor.line < doc().scrollLine) doc().cursor.line = doc().scrollLine;
-        if (doc().cursor.line >= doc().scrollLine + contentHeight) doc().scrollLine = doc().cursor.line - contentHeight + 1;
+        int contentHeight = std::max(1, LINES - contentTop - 1);
+        if (doc().cursor.line < doc().scrollLine) {
+            doc().scrollLine = doc().cursor.line;
+        } else if (doc().cursor.line >= doc().scrollLine + contentHeight) {
+            doc().scrollLine = doc().cursor.line - contentHeight + 1;
+        }
     }
 
     void loadFile(const std::string &path) {
@@ -406,6 +413,36 @@ private:
     }
 
     void handleMouseEvent(const MEVENT &event) {
+        // 1. Mouse Wheel Scrolling anywhere in the window
+        #if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
+        const mmask_t wheelUp = BUTTON4_PRESSED;
+        const mmask_t wheelDown = BUTTON5_PRESSED;
+        #else
+        const mmask_t wheelUp = 0x10000;
+        const mmask_t wheelDown = 0x200000;
+        #endif
+
+        if (event.bstate & wheelUp) {
+            int scrollStep = 3;
+            doc().scrollLine = std::max(0, doc().scrollLine - scrollStep);
+            int contentHeight = std::max(1, LINES - 4);
+            if (doc().cursor.line > doc().scrollLine + contentHeight - 1) {
+                doc().cursor.line = doc().scrollLine + contentHeight - 1;
+                doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
+            }
+            return;
+        }
+        if (event.bstate & wheelDown) {
+            int maxScroll = std::max(0, static_cast<int>(doc().lines.size()) - 1);
+            int scrollStep = 3;
+            doc().scrollLine = std::min(maxScroll, doc().scrollLine + scrollStep);
+            if (doc().cursor.line < doc().scrollLine) {
+                doc().cursor.line = doc().scrollLine;
+                doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
+            }
+            return;
+        }
+
         int my = event.y, mx = event.x;
 
         // Row 0: Menu Bar
@@ -416,7 +453,7 @@ private:
                 if (mx >= offset && mx < offset + menuLen) {
                     int sel = static_cast<int>(i);
                     TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                        [this](int m, int it) { executeMenuAction(m, it); });
+                                         [this](int m, int it) { executeMenuAction(m, it); });
                     return;
                 }
                 offset += menuLen;
@@ -497,17 +534,16 @@ private:
         if (my == 2 && (event.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
             int toolOffset = 1;
             if (doc().mode == TuiMode::RichText) {
-                // {"Save", "PDF", "Open", "Font", "Size", "Bold", "Italic"}
+                // {"Save", "Open", "Font", "Size", "Bold", "Italic"}
                 for (size_t b = 0; b < TuiView::toolbarButtons.size(); ++b) {
                     int btnLen = static_cast<int>(TuiView::toolbarButtons[b].length()) + 4;
                     if (mx >= toolOffset && mx < toolOffset + btnLen) {
                         if (b == 0) saveCurrentFile();
-                        else if (b == 1) exportDocument("PDF", "pdf");
-                        else if (b == 2) promptOpen();
-                        else if (b == 3) TuiActions::handleFontSelection(doc());
-                        else if (b == 4) TuiActions::handleFontSizeSelection(doc());
-                        else if (b == 5) TuiActions::injectTagAroundSelection(doc(), "<b>", "</b>");
-                        else if (b == 6) TuiActions::injectTagAroundSelection(doc(), "<i>", "</i>");
+                        else if (b == 1) promptOpen();
+                        else if (b == 2) TuiActions::handleFontSelection(doc());
+                        else if (b == 3) TuiActions::handleFontSizeSelection(doc());
+                        else if (b == 4) TuiActions::injectTagAroundSelection(doc(), "<b>", "</b>");
+                        else if (b == 5) TuiActions::injectTagAroundSelection(doc(), "<i>", "</i>");
                         return;
                     }
                     toolOffset += btnLen + 1;
@@ -531,15 +567,17 @@ private:
             return;
         }
 
-        // Content Lines & Line Number Area Click
+        // Content Lines & Line Number Area Click / Drag
         int contentTop = 3;
         int contentBottom = LINES - 2;
-        if (my >= contentTop && my <= contentBottom) {
+        if ((my >= contentTop && my <= contentBottom) || m_isDragging) {
             int lineNumWidth = (doc().mode == TuiMode::Code) ? 6 : 0;
-            int targetLine = doc().scrollLine + (my - contentTop);
+            int clampedY = std::clamp(my, contentTop, contentBottom);
+            int targetLine = doc().scrollLine + (clampedY - contentTop);
+            targetLine = std::clamp(targetLine, 0, static_cast<int>(doc().lines.size()) - 1);
 
             // Gutter selection
-            if (doc().mode == TuiMode::Code && mx < lineNumWidth && targetLine < static_cast<int>(doc().lines.size())) {
+            if (doc().mode == TuiMode::Code && mx < lineNumWidth) {
                 doc().selectionAnchor = {targetLine, 0};
                 doc().cursor.line = targetLine;
                 doc().cursor.col = static_cast<int>(doc().lines[targetLine].length());
@@ -548,38 +586,26 @@ private:
             }
 
             int targetCol = std::max(0, mx - lineNumWidth);
+            targetCol = std::min(targetCol, static_cast<int>(doc().lines[targetLine].length()));
 
-            if (targetLine < static_cast<int>(doc().lines.size())) {
-                targetCol = std::min(targetCol, static_cast<int>(doc().lines[targetLine].length()));
-                if (event.bstate & BUTTON1_PRESSED) {
-                    doc().cursor.line = targetLine;
-                    doc().cursor.col = targetCol;
-                    doc().selectionAnchor = doc().cursor;
-                    doc().hasSelection = false;
-                    m_isDragging = true;
-                } else if ((event.bstate & REPORT_MOUSE_POSITION) && m_isDragging) {
+            if (event.bstate & BUTTON1_PRESSED) {
+                doc().cursor.line = targetLine;
+                doc().cursor.col = targetCol;
+                doc().selectionAnchor = doc().cursor;
+                doc().hasSelection = false;
+                m_isDragging = true;
+            } else if ((event.bstate & REPORT_MOUSE_POSITION) && m_isDragging) {
+                doc().cursor.line = targetLine;
+                doc().cursor.col = targetCol;
+                if (!(doc().cursor == doc().selectionAnchor)) doc().hasSelection = true;
+            } else if (event.bstate & BUTTON1_RELEASED) {
+                if (m_isDragging) {
                     doc().cursor.line = targetLine;
                     doc().cursor.col = targetCol;
                     if (!(doc().cursor == doc().selectionAnchor)) doc().hasSelection = true;
-                } else if (event.bstate & BUTTON1_RELEASED) {
-                    if (m_isDragging) {
-                        doc().cursor.line = targetLine;
-                        doc().cursor.col = targetCol;
-                        if (!(doc().cursor == doc().selectionAnchor)) doc().hasSelection = true;
-                    }
-                    m_isDragging = false;
                 }
+                m_isDragging = false;
             }
-            return;
-        }
-
-        // Mouse Wheel Scroll
-        if (event.bstate & 0x10000) {
-            if (doc().scrollLine > 0) doc().scrollLine--;
-            return;
-        }
-        if (event.bstate & 0x200000) {
-            if (doc().scrollLine + 1 < static_cast<int>(doc().lines.size())) doc().scrollLine++;
             return;
         }
     }
@@ -614,12 +640,11 @@ private:
             saveCurrentFile();
             return;
         }
-        if (ch == KEY_F(9)) { exportDocument("PDF", "pdf"); return; }
         if (ch == KEY_F(10)) { exportDocument("ODF", "odt"); return; }
         if (ch == KEY_F(11)) {
             int sel = 0;
             TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                [this](int m, int it) { executeMenuAction(m, it); });
+                                 [this](int m, int it) { executeMenuAction(m, it); });
             return;
         }
         if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; }
@@ -678,16 +703,40 @@ private:
                 doc().cursor.col = 0;
             }
         } else if (ch == KEY_PPAGE) {
-            doc().cursor.line = std::max(0, doc().cursor.line - (LINES - 4));
+            int pageJump = std::max(1, LINES - 4);
+            doc().cursor.line = std::max(0, doc().cursor.line - pageJump);
             doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
         } else if (ch == KEY_NPAGE) {
-            doc().cursor.line = std::min(static_cast<int>(doc().lines.size()) - 1, doc().cursor.line + (LINES - 4));
+            int pageJump = std::max(1, LINES - 4);
+            doc().cursor.line = std::min(static_cast<int>(doc().lines.size()) - 1, doc().cursor.line + pageJump);
             doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
         } else if (ch == KEY_HOME) {
             doc().cursor.col = 0;
         } else if (ch == KEY_END) {
             doc().cursor.col = static_cast<int>(doc().lines[doc().cursor.line].length());
-        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        } 
+        // Delete key (KEY_DC)
+        else if (ch == KEY_DC) {
+            if (doc().hasSelection) {
+                TuiActions::handleDeleteSelection(doc());
+                return;
+            }
+            doc().pushUndo();
+            if (doc().cursor.col < static_cast<int>(doc().lines[doc().cursor.line].length())) {
+                doc().lines[doc().cursor.line].erase(doc().cursor.col, 1);
+                doc().modified = true;
+            } else if (doc().cursor.line + 1 < static_cast<int>(doc().lines.size())) {
+                doc().lines[doc().cursor.line] += doc().lines[doc().cursor.line + 1];
+                doc().lines.erase(doc().lines.begin() + doc().cursor.line + 1);
+                doc().modified = true;
+            }
+        }
+        // Backspace key
+        else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+            if (doc().hasSelection) {
+                TuiActions::handleDeleteSelection(doc());
+                return;
+            }
             if (doc().mode == TuiMode::Code && TuiActions::handleSmartBackspace(doc())) {
                 return;
             }
@@ -705,6 +754,9 @@ private:
                 doc().modified = true;
             }
         } else if (ch == 10 || ch == KEY_ENTER) {
+            if (doc().hasSelection) {
+                TuiActions::handleDeleteSelection(doc());
+            }
             if (doc().mode == TuiMode::Code) {
                 TuiActions::handleSmartReturn(doc());
             } else {
@@ -718,6 +770,9 @@ private:
                 doc().modified = true;
             }
         } else if (ch >= 32 && ch <= 126) {
+            if (doc().hasSelection) {
+                TuiActions::handleDeleteSelection(doc());
+            }
             doc().lines[doc().cursor.line].insert(doc().cursor.col, 1, static_cast<char>(ch));
             doc().cursor.col++;
             doc().modified = true;

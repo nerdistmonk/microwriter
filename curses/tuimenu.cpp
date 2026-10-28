@@ -5,6 +5,27 @@
 
 namespace TuiMenu {
 
+static void drawMenuBorder(WINDOW *win, int height, int width) {
+    // UTF-8 box characters: ┌ ─ ┐ │ └ ─ ┘
+    // Directly output UTF-8 so terminals never interpret them as VT100 ACS 'q' and 'x'
+    mvwprintw(win, 0, 0, "\xe2\x94\x8c"); // ┌
+    for (int i = 1; i < width - 1; ++i) {
+        wprintw(win, "\xe2\x94\x80");     // ─
+    }
+    wprintw(win, "\xe2\x94\x90");         // ┐
+
+    for (int y = 1; y < height - 1; ++y) {
+        mvwprintw(win, y, 0, "\xe2\x94\x82");         // │
+        mvwprintw(win, y, width - 1, "\xe2\x94\x82"); // │
+    }
+
+    mvwprintw(win, height - 1, 0, "\xe2\x94\x94"); // └
+    for (int i = 1; i < width - 1; ++i) {
+        wprintw(win, "\xe2\x94\x80");              // ─
+    }
+    wprintw(win, "\xe2\x94\x98");                  // ┘
+}
+
 void runMenuLoop(
     std::vector<EditorDocument> &documents,
     size_t &activeDocIdx,
@@ -16,6 +37,14 @@ void runMenuLoop(
     bool menuActive = true;
     int menuSelect = initialMenuSelect;
     int subSelect = 0;
+
+    #if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
+    const mmask_t wheelUp = BUTTON4_PRESSED;
+    const mmask_t wheelDown = BUTTON5_PRESSED;
+    #else
+    const mmask_t wheelUp = 0x10000;
+    const mmask_t wheelDown = 0x200000;
+    #endif
 
     while (menuActive) {
         TuiView::render(documents, activeDocIdx, true, menuSelect, topMenus);
@@ -42,7 +71,7 @@ void runMenuLoop(
 
         WINDOW *mWin = newwin(subHeight, subWidth, 1, subX);
         wbkgd(mWin, COLOR_PAIR(6));
-        box(mWin, 0, 0);
+        drawMenuBorder(mWin, subHeight, subWidth);
 
         for (size_t j = 0; j < items.size(); ++j) {
             if (static_cast<int>(j) == subSelect) wattron(mWin, A_REVERSE);
@@ -56,21 +85,45 @@ void runMenuLoop(
         if (ch == KEY_MOUSE) {
             MEVENT ev;
             if (getmouse(&ev) == OK) {
-                if (ev.y == 0 && (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
+                // Wheel scrolling inside menu
+                if (ev.bstate & wheelUp) {
+                    subSelect = (subSelect + static_cast<int>(items.size()) - 1) % items.size();
+                    delwin(mWin);
+                    continue;
+                }
+                if (ev.bstate & wheelDown) {
+                    subSelect = (subSelect + 1) % items.size();
+                    delwin(mWin);
+                    continue;
+                }
+
+                // Top menu bar interaction
+                if (ev.y == 0) {
                     int offset = 2;
                     bool hit = false;
                     for (size_t i = 0; i < topMenus.size(); ++i) {
                         int menuLen = static_cast<int>(topMenus[i].length()) + 4;
                         if (ev.x >= offset && ev.x < offset + menuLen) {
-                            if (menuSelect == static_cast<int>(i)) menuActive = false;
-                            else { menuSelect = static_cast<int>(i); subSelect = 0; }
+                            if (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED)) {
+                                if (menuSelect == static_cast<int>(i)) menuActive = false;
+                                else { menuSelect = static_cast<int>(i); subSelect = 0; }
+                            } else if (ev.bstate & REPORT_MOUSE_POSITION) {
+                                if (menuSelect != static_cast<int>(i)) {
+                                    menuSelect = static_cast<int>(i);
+                                    subSelect = 0;
+                                }
+                            }
                             hit = true;
                             break;
                         }
                         offset += menuLen;
                     }
-                    if (!hit) menuActive = false;
-                } else if (ev.y >= 1 && ev.y < 1 + subHeight && ev.x >= subX && ev.x < subX + subWidth) {
+                    if (!hit && (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
+                        menuActive = false;
+                    }
+                } 
+                // Submenu items interaction (click or hover tracking)
+                else if (ev.y >= 1 && ev.y < 1 + subHeight && ev.x >= subX && ev.x < subX + subWidth) {
                     int itemIdx = ev.y - 2;
                     if (itemIdx >= 0 && itemIdx < static_cast<int>(items.size())) {
                         subSelect = itemIdx;
@@ -80,7 +133,9 @@ void runMenuLoop(
                             return;
                         }
                     }
-                } else if (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED)) {
+                } 
+                // Click outside closes menu
+                else if (ev.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED)) {
                     menuActive = false;
                 }
             }
