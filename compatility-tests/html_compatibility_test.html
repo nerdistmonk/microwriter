@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroWriter HTML Compatibility Suite</title>
+    <style>
+        body {
+            font-family: monospace;
+            background-color: #1e1e1e;
+            color: #d4d4d4;
+            padding: 2rem;
+            line-height: 1.5;
+        }
+        h1, h2, h3 { color: #4ec9b0; }
+        code { background-color: #2d2d2d; padding: 0.2rem 0.4rem; border-radius: 4px; }
+        pre { background-color: #2d2d2d; padding: 1rem; border-left: 4px solid #4ec9b0; overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+        th, td { border: 1px solid #444; padding: 0.5rem; text-align: left; }
+        th { background-color: #333; }
+        blockquote { border-left: 4px solid #ce9178; margin: 1rem 0; padding-left: 1rem; color: #ce9178; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>HTML5 Compatibility Test Suite</h1>
+        <p>Designed for testing HTML parsing, syntax coloring, and layout rendering in <code>MicroWriter</code>.</p>
+    </header>
+
+    <main>
+        <section>
+            <h2>Text Formatting & Inline Elements</h2>
+            <p>This paragraph contains <strong>strong text</strong>, <em>emphasized text</em>, <mark>highlighted text</mark>, <del>deleted text</del>, and <code>inline code snippets</code>.</p>
+            <p>You can also test subscript (H<sub>2</sub>O) and superscript (E = mc<sup>2</sup>) elements.</p>
+        </section>
+
+        <section>
+            <h2>Blockquotes & Citations</h2>
+            <blockquote>
+                "Premature optimization is the root of all evil in programming."
+                <footer>— Donald Knuth</footer>
+            </blockquote>
+        </section>
+
+        <section>
+            <h2>Lists</h2>
+            <h3>Unordered List</h3>
+            <ul>
+                <li>First item in the list</li>
+                <li>Second item with nested sub-items:
+                    <ul>
+                        <li>Sub-item Alpha</li>
+                        <li>Sub-item Beta</li>
+                    </ul>
+                </li>
+            </ul>
+
+            <h3>Ordered List</h3>
+            <ol>
+                <li>Initialize ncurses screen buffer.</li>
+                <li>Capture user input event loop.</li>
+                <li>Render modal dialogs with format extension handlers.</li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>Code Blocks</h2>
+            <pre><code>#include &lt;stdio.h&gt;
+
+int main(void) {
+    printf("Rendering HTML in MicroWriter...\n");
+    return 0;
+}</code></pre>
+        </section>
+
+        <section>
+            <h2>Tables</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Tag</th>
+                        <th>Description</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>&lt;table&gt;</code></td>
+                        <td>Defines a data table</td>
+                        <td>Tested</td>
+                    </tr>
+                    <tr>
+                        <td><code>&lt;form&gt;</code></td>
+                        <td>Creates interactive user inputs</td>
+                        <td>Pending</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <section>
+            <h2>Interactive Form Elements</h2>
+            <form action="#" method="post">
+                <div>
+                    <label for="filename">File Name:</label><br>
+                    <input type="text" id="filename" name="filename" value="document.html">
+                </div>
+                <br>
+                <div>
+                    <label for="format">Save Format:</label><br>
+                    <select id="format" name="format">
+                        <option value="html">HTML</option>
+                        <option value="md">Markdown</option>
+                        <option value="txt">Plain Text</option>
+                    </select>
+                </div>
+                <br>
+                <div>
+                    <button type="submit">Save File</button>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <footer>
+        <hr>
+        <p><small>&copy; 2026 MicroWriter Project. All rights reserved.</small></p>
+    </footer>
+
+</body>
+</html>

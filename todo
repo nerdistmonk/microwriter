@@ -1,0 +1,25 @@
+NCurses Version:
+RegEx Cheatsheet opens Dialog
+Add additional file types to open in code view mode.
+Investigate why a file dropped in size slightly after saving (doesn't happen in qt6)
+overhaul open file dialog
+aspell integration
+Can't see fonts/rich text formatting tags in existing files
+Can't see markdown code in code view
+Fix it so adding spaces between things applies
+offer .txt format as a save option
+
+QT6 Version Parity:
+
+Ctrl + D = cut line like nano
+Update RegEx Cheatsheet
+Add sed cheatsheet
+Add bash examples
+Block quoting
+add additional file types to open in code view mode.
+margin issues between web to normal
+Make it so you can enlarge the font size of selected text
+Overhaul tables/movement/adjustment
+Fix it so adding spaces between things applies
+add a 'cleanup code' option
+Can't see markdown code in code view
