@@ -17,6 +17,11 @@
 #include <thread>
 #include <regex>
 
+static const std::vector<std::string> g_tuiStrictCodeExts = {
+    "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
+    "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake"
+};
+
 class NcursesEditor {
 public:
     NcursesEditor() = default;
@@ -111,6 +116,16 @@ private:
         }
     }
 
+    bool isDocStrictCode(const EditorDocument &d) const {
+        std::string ext = "";
+        size_t dot = d.filePath.find_last_of('.');
+        if (dot != std::string::npos) {
+            ext = d.filePath.substr(dot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        }
+        return std::find(g_tuiStrictCodeExts.begin(), g_tuiStrictCodeExts.end(), ext) != g_tuiStrictCodeExts.end();
+    }
+
     std::string serializeDocToRaw(const EditorDocument &d) {
         std::string ext = "";
         size_t dot = d.filePath.find_last_of('.');
@@ -124,28 +139,16 @@ private:
             for (size_t i = 0; i < d.lines.size(); ++i) {
                 std::string l = d.lines[i];
 
-                // 1. Bullets
                 if (l.rfind("• ", 0) == 0) {
                     l = "- " + l.substr(std::string("• ").length());
-                }
-
-                // 2. Horizontal Rules
-                if (l.find("<hr") != std::string::npos) {
+                } else if (l.find("<hr") != std::string::npos) {
                     l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "---");
-                }
-
-                // 3. Blockquotes
-                if (l.find("<blockquote") != std::string::npos) {
+                } else if (l.find("<blockquote") != std::string::npos) {
                     l = std::regex_replace(l, std::regex("</?blockquote>"), "");
                     size_t first = l.find_first_not_of(" \t");
-                    if (first != std::string::npos) {
-                        l = "> " + l.substr(first);
-                    } else {
-                        l = "> ";
-                    }
+                    l = (first != std::string::npos) ? ("> " + l.substr(first)) : "> ";
                 }
 
-                // 4. Tables (<table border="1"> ... </table>)
                 if (l.find("<table") != std::string::npos) {
                     std::string tableContent;
                     while (i < d.lines.size()) {
@@ -175,20 +178,16 @@ private:
                         size_t maxCols = 0;
                         for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
 
-                        out << "\n";
-                        // Header row
-                        out << "|";
+                        out << "\n|";
                         for (size_t c = 0; c < maxCols; ++c) {
                             std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
                             out << " " << val << " |";
                         }
                         out << "\n|";
-                        // Separator row
                         for (size_t c = 0; c < maxCols; ++c) {
                             out << " --- |";
                         }
                         out << "\n";
-                        // Subsequent rows
                         for (size_t r = 1; r < rows.size(); ++r) {
                             out << "|";
                             for (size_t c = 0; c < maxCols; ++c) {
@@ -202,6 +201,25 @@ private:
                     }
                 }
 
+                out << l;
+                if (i + 1 < d.lines.size()) out << "\n";
+            }
+            return out.str();
+        }
+
+        if (ext == "txt") {
+            for (size_t i = 0; i < d.lines.size(); ++i) {
+                std::string l = d.lines[i];
+                if (l.rfind("• ", 0) == 0) {
+                    l = "- " + l.substr(std::string("• ").length());
+                } else if (l.find("<hr") != std::string::npos) {
+                    l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "----------------------------------------");
+                } else if (l.find("<blockquote") != std::string::npos) {
+                    l = std::regex_replace(l, std::regex("</?blockquote>"), "");
+                    size_t first = l.find_first_not_of(" \t");
+                    l = (first != std::string::npos) ? ("> " + l.substr(first)) : "> ";
+                }
+                l = std::regex_replace(l, std::regex("<[^>]*>"), "");
                 out << l;
                 if (i + 1 < d.lines.size()) out << "\n";
             }
@@ -363,17 +381,12 @@ private:
             while (std::getline(ss, line)) {
                 if (!line.empty() && line.back() == '\r') line.pop_back();
 
-                if (ext == "md") {
-                    // 1. Bullets
+                if (ext == "md" || ext == "txt") {
                     if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
                         line = "• " + line.substr(2);
-                    }
-                    // 2. Horizontal Rules
-                    else if (line == "---" || line == "***" || line == "___") {
+                    } else if (line == "---" || line == "***" || line == "___") {
                         line = "<hr>";
-                    }
-                    // 3. Blockquotes
-                    else if (line.rfind("> ", 0) == 0) {
+                    } else if (line.rfind("> ", 0) == 0) {
                         line = "<blockquote>" + line.substr(2) + "</blockquote>";
                     } else if (line == ">") {
                         line = "<blockquote></blockquote>";
@@ -387,6 +400,11 @@ private:
 
     void switchDocumentMode(TuiMode targetMode) {
         if (doc().mode == targetMode) return;
+
+        // Code format lockout: never switch source code or config files to RichText
+        if (targetMode == TuiMode::RichText && isDocStrictCode(doc())) {
+            return;
+        }
 
         bool prevModified = doc().modified;
 
@@ -475,7 +493,13 @@ private:
         std::string curPath = doc().filePath;
         if (curPath.empty()) curPath = "untitled";
         
-        int fmtType = (curPath.length() >= 3 && curPath.compare(curPath.length() - 3, 3, ".md") == 0) ? 1 : 0;
+        int fmtType = 0;
+        if (curPath.length() >= 3 && curPath.compare(curPath.length() - 3, 3, ".md") == 0) {
+            fmtType = 1;
+        } else if (curPath.length() >= 4 && curPath.compare(curPath.length() - 4, 4, ".txt") == 0) {
+            fmtType = 2;
+        }
+
         if (!TuiDialogs::showSaveAsModal(curPath, fmtType)) {
             return;
         }
@@ -509,6 +533,14 @@ private:
         if (doc().mode == TuiMode::RichText && ext == "md") {
             std::string mdContent = serializeDocToRaw(doc());
             out << mdContent;
+            doc().modified = false;
+            triggerSaveFlash();
+            return;
+        }
+
+        if (doc().mode == TuiMode::RichText && ext == "txt") {
+            std::string txtContent = serializeDocToRaw(doc());
+            out << txtContent;
             doc().modified = false;
             triggerSaveFlash();
             return;
