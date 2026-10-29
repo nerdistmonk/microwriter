@@ -39,7 +39,38 @@ void BracketHighlighter::setupRules() {
 
     HighlightingRule rule;
 
-    // Keywords (C/C++, Python, JS, HTML)
+    // 1. HTML / XML Tags (<tag> and </tag>)
+    QTextCharFormat tagFormat;
+    tagFormat.setForeground(m_darkMode ? QColor(86, 156, 214) : QColor(128, 0, 128));
+    tagFormat.setFontWeight(QFont::Bold);
+    rule.pattern = QRegularExpression(QStringLiteral("</?[a-zA-Z0-9_-]+(\\s*|/?)>|/[a-zA-Z0-9_-]+"));
+    rule.format = tagFormat;
+    m_highlightingRules.append(rule);
+
+    // 2. HTML Attributes (e.g., class=, href=, style=, src=)
+    QTextCharFormat attrFormat;
+    attrFormat.setForeground(m_darkMode ? QColor(156, 220, 254) : QColor(0, 100, 150));
+    rule.pattern = QRegularExpression(QStringLiteral("\\b[a-zA-Z0-9_-]+(?=\\=)"));
+    rule.format = attrFormat;
+    m_highlightingRules.append(rule);
+
+    // 3. Markdown Headers (# Header)
+    QTextCharFormat mdHeaderFormat;
+    mdHeaderFormat.setForeground(m_darkMode ? QColor(78, 201, 176) : QColor(0, 128, 128));
+    mdHeaderFormat.setFontWeight(QFont::Bold);
+    rule.pattern = QRegularExpression(QStringLiteral("^\\s*#{1,6}\\s+.*$"));
+    rule.format = mdHeaderFormat;
+    m_highlightingRules.append(rule);
+
+    // 4. Markdown Bullet / List Markers (- item or * item)
+    QTextCharFormat mdListFormat;
+    mdListFormat.setForeground(m_darkMode ? QColor(220, 220, 170) : QColor(160, 80, 0));
+    mdListFormat.setFontWeight(QFont::Bold);
+    rule.pattern = QRegularExpression(QStringLiteral("^\\s*([*+-]|\\d+\\.)\\s+"));
+    rule.format = mdListFormat;
+    m_highlightingRules.append(rule);
+
+    // 5. General Keywords (C/C++, Python, JS, HTML/Web)
     QTextCharFormat keywordFormat;
     keywordFormat.setForeground(m_darkMode ? QColor(86, 156, 214) : QColor(0, 0, 255));
     keywordFormat.setFontWeight(QFont::Bold);
@@ -67,21 +98,21 @@ void BracketHighlighter::setupRules() {
         m_highlightingRules.append(rule);
     }
 
-    // Number literals
+    // 6. Number literals
     QTextCharFormat numberFormat;
     numberFormat.setForeground(m_darkMode ? QColor(181, 206, 168) : QColor(9, 134, 88));
     rule.pattern = QRegularExpression(QStringLiteral("\\b(0x[0-9a-fA-F]+|\\d+(\\.\\d+)?)\\b"));
     rule.format = numberFormat;
     m_highlightingRules.append(rule);
 
-    // Single-line Strings
+    // 7. Single-line Strings
     QTextCharFormat stringFormat;
     stringFormat.setForeground(m_darkMode ? QColor(206, 145, 120) : QColor(163, 21, 21));
     rule.pattern = QRegularExpression(QStringLiteral("\".*?\"|'.*?'"));
     rule.format = stringFormat;
     m_highlightingRules.append(rule);
 
-    // Single-line comments (// and #)
+    // 8. Single-line comments (// and #)
     QTextCharFormat singleLineComment;
     singleLineComment.setForeground(m_darkMode ? QColor(106, 153, 85) : QColor(0, 128, 0));
     singleLineComment.setFontItalic(true);
@@ -89,18 +120,18 @@ void BracketHighlighter::setupRules() {
     rule.format = singleLineComment;
     m_highlightingRules.append(rule);
 
-    // Trailing whitespace only (red/subtle background tint at end of line)
+    // 9. Trailing whitespace only
     QTextCharFormat trailingWhitespaceFormat;
     trailingWhitespaceFormat.setBackground(m_darkMode ? QColor(100, 30, 30, 180) : QColor(255, 180, 180));
     rule.pattern = QRegularExpression(QStringLiteral("[ \\t]+$"));
     rule.format = trailingWhitespaceFormat;
     m_highlightingRules.append(rule);
 
-    // Multi-line comments (/* ... */)
+    // 10. Multi-line comments (/* ... */ and <!-- ... -->)
     m_multiLineCommentFormat.setForeground(m_darkMode ? QColor(106, 153, 85) : QColor(0, 128, 0));
     m_multiLineCommentFormat.setFontItalic(true);
-    m_commentStartRegex = QRegularExpression(QStringLiteral("/\\*"));
-    m_commentEndRegex = QRegularExpression(QStringLiteral("\\*/"));
+    m_commentStartRegex = QRegularExpression(QStringLiteral("/\\*|<!--"));
+    m_commentEndRegex = QRegularExpression(QStringLiteral("\\*/|-->"));
 }
 
 void BracketHighlighter::setDarkMode(bool dark) {
@@ -110,7 +141,6 @@ void BracketHighlighter::setDarkMode(bool dark) {
 }
 
 void BracketHighlighter::highlightBlock(const QString &text) {
-    // 1. General syntax rules (keywords, numbers, strings, single-line comments, trailing whitespace)
     for (const HighlightingRule &rule : m_highlightingRules) {
         QRegularExpressionMatchIterator iter = rule.pattern.globalMatch(text);
         while (iter.hasNext()) {
@@ -119,7 +149,6 @@ void BracketHighlighter::highlightBlock(const QString &text) {
         }
     }
 
-    // 2. Multi-line comment state handling
     int prevState = previousBlockState();
     int depth = (prevState >= 0) ? (prevState & 0xFFFF) : 0;
     bool inComment = (prevState >= 0) ? ((prevState & 0x10000) != 0) : false;
@@ -143,7 +172,6 @@ void BracketHighlighter::highlightBlock(const QString &text) {
         startIndex = inComment ? -1 : text.indexOf(m_commentStartRegex, startIndex + commentLength);
     }
 
-    // 3. String & Comment Aware Bracket Highlighting
     const QVector<QColor> &palette = m_darkMode ? m_colorsDark : m_colorsLight;
     if (!palette.isEmpty()) {
         bool inString = false;
@@ -152,13 +180,11 @@ void BracketHighlighter::highlightBlock(const QString &text) {
         for (int i = 0; i < text.length(); ++i) {
             QChar c = text.at(i);
 
-            // Skip comments
             QTextCharFormat fmtAtPos = format(i);
             if (fmtAtPos.fontItalic()) {
                 continue;
             }
 
-            // String tracking to prevent coloring brackets inside literals
             if (inString) {
                 if (c == stringQuote && (i == 0 || text.at(i - 1) != '\\')) {
                     inString = false;
@@ -234,7 +260,6 @@ CodeEditorView::CodeEditorView(QWidget *parent)
     monoFont.setPointSize(11);
     setFont(monoFont);
 
-    // Standardize visual tab width to 4 spaces
     setTabStopDistance(fontMetrics().horizontalAdvance(' ') * 4);
 
     m_highlighter = new BracketHighlighter(document());
@@ -320,7 +345,6 @@ void CodeEditorView::setDarkMode(bool dark) {
 }
 
 void CodeEditorView::keyPressEvent(QKeyEvent *event) {
-    // 1. Move Line Up / Down (Alt+Up / Alt+Down)
     if ((event->modifiers() & Qt::AltModifier) && !(event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
         if (event->key() == Qt::Key_Up) {
             handleMoveLine(true);
@@ -331,19 +355,16 @@ void CodeEditorView::keyPressEvent(QKeyEvent *event) {
         }
     }
 
-    // 2. Toggle Line Comment (Ctrl+/ or Ctrl+Shift+/)
     if ((event->modifiers() & Qt::ControlModifier) && (event->key() == Qt::Key_Slash || event->key() == Qt::Key_Question)) {
         handleToggleComment();
         return;
     }
 
-    // 3. Duplicate Line / Selection (Ctrl+D)
     if ((event->modifiers() & Qt::ControlModifier) && !(event->modifiers() & Qt::ShiftModifier) && event->key() == Qt::Key_D) {
         handleDuplicate();
         return;
     }
 
-    // 4. Block Indent / Tab
     if (event->key() == Qt::Key_Tab && !(event->modifiers() & Qt::ShiftModifier)) {
         if (textCursor().hasSelection()) {
             handleIndent();
@@ -357,14 +378,12 @@ void CodeEditorView::keyPressEvent(QKeyEvent *event) {
         return;
     }
 
-    // 5. Smart Backspace
     if (event->key() == Qt::Key_Backspace && event->modifiers() == Qt::NoModifier) {
         if (handleSmartBackspace()) {
             return;
         }
     }
 
-    // 6. Smart Return / Indent
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         handleReturn();
         return;
@@ -383,7 +402,6 @@ bool CodeEditorView::handleSmartBackspace() {
     QString text = cursor.block().text();
     QString before = text.left(posInBlock);
 
-    // If the entire text before cursor is spaces
     bool allSpaces = true;
     for (QChar ch : before) {
         if (ch != ' ') {
@@ -429,7 +447,6 @@ void CodeEditorView::handleToggleComment() {
         commentMarker = "# ";
     }
 
-    // Check if all lines are currently commented
     bool allCommented = true;
     for (int i = startBlock; i <= endBlock; ++i) {
         QTextBlock blk = document()->findBlockByNumber(i);
@@ -451,7 +468,6 @@ void CodeEditorView::handleToggleComment() {
         QString text = blk.text();
 
         if (allCommented) {
-            // Uncomment
             int idx = text.indexOf(commentMarker);
             int len = commentMarker.length();
             if (idx == -1) {
@@ -466,7 +482,6 @@ void CodeEditorView::handleToggleComment() {
                 c.removeSelectedText();
             }
         } else {
-            // Comment
             QTextCursor c(blk);
             int leadingSpaces = 0;
             while (leadingSpaces < text.length() && text.at(leadingSpaces).isSpace()) {

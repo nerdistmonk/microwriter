@@ -234,7 +234,6 @@ void handleInsertNumberedList(EditorDocument &doc) {
     int num = 1;
     for (int i = startLine; i <= endLine; ++i) {
         std::string &l = doc.lines[i];
-        // Strip existing number prefix if present
         size_t dotPos = l.find(". ");
         if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
             bool allDigits = true;
@@ -358,7 +357,6 @@ void handlePaste(EditorDocument &doc) {
 
     doc.pushUndo();
 
-    // If text is currently highlighted/selected, erase the selection first
     if (doc.hasSelection) {
         TextPosition start = doc.selectionAnchor;
         TextPosition end = doc.cursor;
@@ -538,10 +536,8 @@ void handleFindReplace(EditorDocument &doc, const std::string &initFind, const s
     bool doReplace = !initReplace.empty() ? true : lastDoReplace;
 
     if (!initFind.empty()) {
-        // Direct invocation (e.g., from cheat sheets)
         doReplace = !initReplace.empty();
     } else {
-        // Modal dialog with toggleable replace checkbox
         if (!TuiDialogs::showFindReplaceModal(findStr, replaceStr, doReplace)) {
             return;
         }
@@ -561,7 +557,6 @@ void handleFindReplace(EditorDocument &doc, const std::string &initFind, const s
             replaceNextRegex(doc, findStr, replaceStr, 0, 0);
         }
     } else {
-        // Find-only mode: Highlight match and navigate to it without modifying text
         if (!findNextRegex(doc, findStr, curLine, curCol)) {
             findNextRegex(doc, findStr, 0, 0);
         }
@@ -840,6 +835,85 @@ void handleChangeCase(EditorDocument &doc, bool upper) {
         }
     }
     doc.modified = true;
+}
+
+void handleSpellCheck(EditorDocument &doc) {
+    std::string word;
+    TextPosition wordStart, wordEnd;
+
+    if (doc.hasSelection) {
+        wordStart = doc.selectionAnchor;
+        wordEnd = doc.cursor;
+        if (wordEnd < wordStart) std::swap(wordStart, wordEnd);
+        if (wordStart.line == wordEnd.line) {
+            word = doc.lines[wordStart.line].substr(wordStart.col, wordEnd.col - wordStart.col);
+        }
+    } else {
+        const std::string &line = doc.lines[doc.cursor.line];
+        if (line.empty()) return;
+        int col = std::min(doc.cursor.col, static_cast<int>(line.length()) - 1);
+        if (col < 0) col = 0;
+        int start = col, end = col;
+        while (start > 0 && (std::isalnum(static_cast<unsigned char>(line[start - 1])) || line[start - 1] == '\'')) {
+            start--;
+        }
+        while (end < static_cast<int>(line.length()) && (std::isalnum(static_cast<unsigned char>(line[end])) || line[end] == '\'')) {
+            end++;
+        }
+        if (start < end) {
+            word = line.substr(start, end - start);
+            wordStart = {doc.cursor.line, start};
+            wordEnd = {doc.cursor.line, end};
+        }
+    }
+
+    if (word.empty()) return;
+
+    std::string cleanWord;
+    for (char c : word) {
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '\'') {
+            cleanWord.push_back(c);
+        }
+    }
+    if (cleanWord.empty()) return;
+
+    std::string cmd = "echo \"" + cleanWord + "\" | aspell -a 2>/dev/null";
+    FILE *fp = popen(cmd.c_str(), "r");
+    std::vector<std::string> suggestions;
+    if (fp) {
+        char buf[1024];
+        while (fgets(buf, sizeof(buf), fp)) {
+            std::string l(buf);
+            if (!l.empty() && l.back() == '\n') l.pop_back();
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (l.rfind("& ", 0) == 0) {
+                size_t colon = l.find(':');
+                if (colon != std::string::npos) {
+                    std::string rest = l.substr(colon + 2);
+                    std::stringstream ss(rest);
+                    std::string item;
+                    while (std::getline(ss, item, ',')) {
+                        size_t first = item.find_first_not_of(" ");
+                        size_t last = item.find_last_not_of(" ");
+                        if (first != std::string::npos && last != std::string::npos) {
+                            suggestions.push_back(item.substr(first, last - first + 1));
+                        }
+                    }
+                }
+            }
+        }
+        pclose(fp);
+    }
+
+    int choice = TuiDialogs::showSpellSuggestionsModal(cleanWord, suggestions);
+    if (choice >= 0 && choice < static_cast<int>(suggestions.size())) {
+        doc.pushUndo();
+        doc.lines[wordStart.line].replace(wordStart.col, wordEnd.col - wordStart.col, suggestions[choice]);
+        doc.cursor.line = wordStart.line;
+        doc.cursor.col = wordStart.col + static_cast<int>(suggestions[choice].length());
+        doc.hasSelection = false;
+        doc.modified = true;
+    }
 }
 
 } // namespace TuiActions

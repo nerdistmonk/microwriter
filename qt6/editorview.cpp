@@ -32,13 +32,11 @@ EditorView::EditorView(QWidget *parent)
       m_dragHeight(0),
       m_imageAspectRatio(1.0)
 {
-    // Default document frame margins - Left set to 0 for flush start
     QTextFrameFormat fmt = document()->rootFrame()->frameFormat();
     fmt.setLeftMargin(0);
     fmt.setRightMargin(20);
     document()->rootFrame()->setFrameFormat(fmt);
 
-    // Reset modification flag so initial frame setup doesn't make a blank document dirty
     document()->setModified(false);
 
     viewport()->setMouseTracking(true);
@@ -46,14 +44,13 @@ EditorView::EditorView(QWidget *parent)
 
 void EditorView::setDarkMode(bool dark) {
     Q_UNUSED(dark);
-    // Background and text colors are updated by applyLayoutModeToEditor
 }
 
 QString EditorView::getContentForSave() {
     QString content;
     QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
 
-    if (m_filePath.endsWith(".md")) {
+    if (m_filePath.endsWith(".md", Qt::CaseInsensitive)) {
         content = toMarkdown();
 
         for (QTextBlock blk = document()->begin(); blk.isValid(); blk = blk.next()) {
@@ -69,9 +66,9 @@ QString EditorView::getContentForSave() {
                     QString replacement;
                     if (ifmt.width() > 0 && ifmt.height() > 0) {
                         replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
-                            .arg(relPath)
-                            .arg((int)ifmt.width())
-                            .arg((int)ifmt.height());
+                                          .arg(relPath)
+                                          .arg((int)ifmt.width())
+                                          .arg((int)ifmt.height());
                     } else {
                         replacement = QString("![](%1)").arg(relPath);
                     }
@@ -80,13 +77,12 @@ QString EditorView::getContentForSave() {
             }
         }
 
-        // Collapse newlines between adjacent image tags so they stay on the same line in Markdown
         content.replace(QRegularExpression("(</img>|<img[^>]+/>)\\s*\\n\\s*(<img)"), "\\1 \\2");
-    } else if (m_filePath.endsWith(".html") || m_filePath.endsWith(".htm")) {
+    } else if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || m_filePath.endsWith(".htm", Qt::CaseInsensitive) || m_filePath.isEmpty()) {
         content = toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
 
-        QRegularExpression imgTagRe("<img[^>]+src=\"([^\"\\>]+)\"[^>]*>");
+        QRegularExpression imgTagRe("<img[^>]+src=\"([^\">]+)\"[^>]*>");
         QRegularExpressionMatchIterator iter = imgTagRe.globalMatch(content);
         QMap<QString, QString> replacements;
 
@@ -112,10 +108,16 @@ QString EditorView::getContentForSave() {
 
 void EditorView::setContent(const QString &content, const QString &fileName) {
     m_filePath = fileName;
-    if (fileName.endsWith(".html") || fileName.endsWith(".htm")) {
+    if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
         setHtml(content);
-    } else if (fileName.endsWith(".md")) {
+    } else if (fileName.endsWith(".md", Qt::CaseInsensitive)) {
         setMarkdown(content);
+    } else if (fileName.isEmpty()) {
+        if (content.contains("<html", Qt::CaseInsensitive) || content.contains("<!DOCTYPE", Qt::CaseInsensitive) || content.contains("<p>", Qt::CaseInsensitive)) {
+            setHtml(content);
+        } else {
+            setPlainText(content);
+        }
     } else {
         setPlainText(content);
     }

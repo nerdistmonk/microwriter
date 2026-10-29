@@ -44,3 +44,5 @@ target_link_libraries(microwriter PRIVATE
     Qt6::PrintSupport 
     ${CURSES_LIBRARIES}
 )
+
+# Arch Linux 64bit/GCC 16.2.1/CMAKE 4.4.4

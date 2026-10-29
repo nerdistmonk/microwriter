@@ -23,7 +23,6 @@ public:
     int run(const std::vector<std::string> &initialFiles, bool forceCodeMode = false) {
         m_defaultCodeMode = forceCodeMode;
 
-        // Initialize user locale for proper Unicode/box-drawing character output
         std::setlocale(LC_ALL, "");
 
         initscr();
@@ -62,7 +61,7 @@ public:
             updateScroll();
             TuiView::render(m_documents, m_activeDocIdx, false, 0, m_topMenus, m_saveFlashActive);
             if (m_saveFlashActive) {
-                m_saveFlashActive = false; // Reset flash state after render
+                m_saveFlashActive = false;
             }
             int ch = getch();
             handleInput(ch);
@@ -82,7 +81,6 @@ private:
     bool m_defaultCodeMode = false;
     bool m_saveFlashActive = false;
 
-    // For tab double click detection
     int m_lastClickTabIdx = -1;
     std::chrono::steady_clock::time_point m_lastClickTime;
 
@@ -96,7 +94,7 @@ private:
         },
         {"Undo", "Redo", "Cut", "Copy", "Paste", "Duplicate Line/Block", "Find & Replace"},
         {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line"},
-        {"Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase"},
+        {"Spell Check (Aspell)", "Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase"},
         {"About MicroWriter TUI", "Regex Cheat Sheet", "HTML Quick Reference", "Sed & Utilities Cheat Sheet", "Useful Bash Scripts"}
     };
 
@@ -110,6 +108,226 @@ private:
         } else if (doc().cursor.line >= doc().scrollLine + contentHeight) {
             doc().scrollLine = doc().cursor.line - contentHeight + 1;
         }
+    }
+
+    std::string serializeDocToRaw(const EditorDocument &d) {
+        std::string ext = "";
+        size_t dot = d.filePath.find_last_of('.');
+        if (dot != std::string::npos) {
+            ext = d.filePath.substr(dot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        }
+
+        std::ostringstream out;
+        if (ext == "md") {
+            for (size_t i = 0; i < d.lines.size(); ++i) {
+                const std::string &l = d.lines[i];
+                if (l.rfind("• ", 0) == 0) {
+                    out << "- " << l.substr(std::string("• ").length());
+                } else {
+                    out << l;
+                }
+                if (i + 1 < d.lines.size()) out << "\n";
+            }
+            return out.str();
+        }
+
+        bool isHtml = (ext == "html" || ext == "htm" || d.filePath.empty());
+        if (isHtml) {
+            bool hasHtmlRoot = false;
+            for (const auto &l : d.lines) {
+                if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos) {
+                    hasHtmlRoot = true;
+                    break;
+                }
+            }
+
+            if (!hasHtmlRoot) {
+                out << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" />\n";
+                out << "<style type=\"text/css\">\n";
+                out << "p { margin: 0px; white-space: pre-wrap; }\n";
+                out << "ul, ol { margin: 0px 0px 0px 24px; padding: 0px; }\n";
+                out << "</style></head><body>\n";
+
+                bool inUl = false;
+                bool inOl = false;
+
+                for (const auto &l : d.lines) {
+                    bool isBullet = (l.rfind("• ", 0) == 0);
+
+                    size_t dotPos = l.find(". ");
+                    bool isNumbered = false;
+                    if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+                        bool allDigits = true;
+                        for (size_t di = 0; di < dotPos; ++di) {
+                            if (!std::isdigit(static_cast<unsigned char>(l[di]))) {
+                                allDigits = false;
+                                break;
+                            }
+                        }
+                        if (allDigits) isNumbered = true;
+                    }
+
+                    if (isBullet) {
+                        if (inOl) { out << "</ol>\n"; inOl = false; }
+                        if (!inUl) { out << "<ul>\n"; inUl = true; }
+                        out << "<li>" << l.substr(std::string("• ").length()) << "</li>\n";
+                    } else if (isNumbered) {
+                        if (inUl) { out << "</ul>\n"; inUl = false; }
+                        if (!inOl) { out << "<ol>\n"; inOl = true; }
+                        out << "<li>" << l.substr(dotPos + 2) << "</li>\n";
+                    } else {
+                        if (inUl) { out << "</ul>\n"; inUl = false; }
+                        if (inOl) { out << "</ol>\n"; inOl = false; }
+
+                        if (l.empty()) {
+                            out << "<p><br /></p>\n";
+                        } else if (l.find("<table") != std::string::npos || l.find("<hr") != std::string::npos ||
+                                   l.find("<tr") != std::string::npos || l.find("<td") != std::string::npos) {
+                            out << l << "\n";
+                        } else {
+                            out << "<p>" << l << "</p>\n";
+                        }
+                    }
+                }
+
+                if (inUl) out << "</ul>\n";
+                if (inOl) out << "</ol>\n";
+
+                out << "</body></html>\n";
+                return out.str();
+            }
+        }
+
+        for (size_t i = 0; i < d.lines.size(); ++i) {
+            out << d.lines[i];
+            if (i + 1 < d.lines.size()) out << "\n";
+        }
+        return out.str();
+    }
+
+    void deserializeRawToRich(EditorDocument &d, const std::string &rawContent) {
+        std::string ext = "";
+        size_t dot = d.filePath.find_last_of('.');
+        if (dot != std::string::npos) {
+            ext = d.filePath.substr(dot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        }
+
+        d.lines.clear();
+
+        bool isHtml = (ext == "html" || ext == "htm" || d.filePath.empty());
+        if (isHtml && (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos)) {
+            size_t pos = 0;
+            int currentOlNum = 1;
+            bool insideOl = false;
+
+            while (pos < rawContent.length()) {
+                size_t nextTag = rawContent.find('<', pos);
+                if (nextTag == std::string::npos) break;
+
+                if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
+                    insideOl = true;
+                    currentOlNum = 1;
+                    pos = rawContent.find('>', nextTag) + 1;
+                    continue;
+                }
+                if (rawContent.compare(nextTag, 5, "</ol>", 5) == 0) {
+                    insideOl = false;
+                    pos = nextTag + 5;
+                    continue;
+                }
+                if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
+                    insideOl = false;
+                    pos = rawContent.find('>', nextTag) + 1;
+                    continue;
+                }
+                if (rawContent.compare(nextTag, 5, "</ul>", 5) == 0) {
+                    pos = nextTag + 5;
+                    continue;
+                }
+
+                if (rawContent.compare(nextTag, 2, "<p", 2) == 0 && (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
+                    size_t closeTag = rawContent.find('>', nextTag);
+                    if (closeTag == std::string::npos) break;
+                    size_t endP = rawContent.find("</p>", closeTag);
+                    if (endP == std::string::npos) break;
+
+                    std::string lineContent = rawContent.substr(closeTag + 1, endP - closeTag - 1);
+                    if (lineContent == "<br />" || lineContent == "<br>" || lineContent == "<br/>") {
+                        d.lines.push_back("");
+                    } else {
+                        d.lines.push_back(lineContent);
+                    }
+                    pos = endP + 4;
+                    continue;
+                }
+
+                if (rawContent.compare(nextTag, 3, "<li", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
+                    size_t closeTag = rawContent.find('>', nextTag);
+                    if (closeTag == std::string::npos) break;
+                    size_t endLi = rawContent.find("</li>", closeTag);
+                    if (endLi == std::string::npos) break;
+
+                    std::string liContent = rawContent.substr(closeTag + 1, endLi - closeTag - 1);
+                    if (insideOl) {
+                        d.lines.push_back(std::to_string(currentOlNum++) + ". " + liContent);
+                    } else {
+                        d.lines.push_back("• " + liContent);
+                    }
+                    pos = endLi + 5;
+                    continue;
+                }
+
+                pos = nextTag + 1;
+            }
+        } else {
+            std::stringstream ss(rawContent);
+            std::string line;
+            while (std::getline(ss, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+
+                if (ext == "md") {
+                    if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
+                        line = "• " + line.substr(2);
+                    }
+                }
+                d.lines.push_back(line);
+            }
+        }
+        if (d.lines.empty()) d.lines.push_back("");
+    }
+
+    void switchDocumentMode(TuiMode targetMode) {
+        if (doc().mode == targetMode) return;
+
+        doc().pushUndo();
+        if (targetMode == TuiMode::Code) {
+            std::string raw = serializeDocToRaw(doc());
+            doc().lines.clear();
+            std::stringstream ss(raw);
+            std::string line;
+            while (std::getline(ss, line)) {
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                doc().lines.push_back(line);
+            }
+            if (doc().lines.empty()) doc().lines.push_back("");
+            doc().mode = TuiMode::Code;
+        } else {
+            std::ostringstream ss;
+            for (size_t i = 0; i < doc().lines.size(); ++i) {
+                ss << doc().lines[i];
+                if (i + 1 < doc().lines.size()) ss << "\n";
+            }
+            deserializeRawToRich(doc(), ss.str());
+            doc().mode = TuiMode::RichText;
+        }
+
+        doc().cursor.line = std::min(doc().cursor.line, static_cast<int>(doc().lines.size()) - 1);
+        doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
+        doc().scrollLine = 0;
+        doc().hasSelection = false;
+        doc().modified = true;
     }
 
     void loadFile(const std::string &path) {
@@ -126,7 +344,8 @@ private:
         }
 
         static const std::vector<std::string> codeExts = {
-            "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css", "xml", "sh", "cmake"
+            "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
+            "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt"
         };
         if (m_defaultCodeMode || std::find(codeExts.begin(), codeExts.end(), ext) != codeExts.end()) {
             d.mode = TuiMode::Code;
@@ -140,90 +359,17 @@ private:
             std::string rawContent((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
             if (rawContent.find("\r\n") != std::string::npos) d.eolFormat = "CRLF";
 
-            // Parse HTML for paragraphs, lists, and tables with full Qt6 compatibility
-            if (d.mode == TuiMode::RichText && (ext == "html" || ext == "htm") &&
-                (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos)) {
-                size_t pos = 0;
-                int currentOlNum = 1;
-                bool insideOl = false;
-
-                while (pos < rawContent.length()) {
-                    size_t nextTag = rawContent.find('<', pos);
-                    if (nextTag == std::string::npos) break;
-
-                    if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
-                        insideOl = true;
-                        currentOlNum = 1;
-                        pos = rawContent.find('>', nextTag) + 1;
-                        continue;
-                    }
-                    if (rawContent.compare(nextTag, 5, "</ol>", 5) == 0) {
-                        insideOl = false;
-                        pos = nextTag + 5;
-                        continue;
-                    }
-                    if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
-                        insideOl = false;
-                        pos = rawContent.find('>', nextTag) + 1;
-                        continue;
-                    }
-                    if (rawContent.compare(nextTag, 5, "</ul>", 5) == 0) {
-                        pos = nextTag + 5;
-                        continue;
-                    }
-
-                    // Process <p> tags
-                    if (rawContent.compare(nextTag, 2, "<p", 2) == 0 && (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
-                        size_t closeTag = rawContent.find('>', nextTag);
-                        if (closeTag == std::string::npos) break;
-                        size_t endP = rawContent.find("</p>", closeTag);
-                        if (endP == std::string::npos) break;
-
-                        std::string lineContent = rawContent.substr(closeTag + 1, endP - closeTag - 1);
-                        if (lineContent == "<br />" || lineContent == "<br>" || lineContent == "<br/>") {
-                            d.lines.push_back("");
-                        } else {
-                            d.lines.push_back(lineContent);
-                        }
-                        pos = endP + 4;
-                        continue;
-                    }
-
-                    // Process <li> tags
-                    if (rawContent.compare(nextTag, 3, "<li", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
-                        size_t closeTag = rawContent.find('>', nextTag);
-                        if (closeTag == std::string::npos) break;
-                        size_t endLi = rawContent.find("</li>", closeTag);
-                        if (endLi == std::string::npos) break;
-
-                        std::string liContent = rawContent.substr(closeTag + 1, endLi - closeTag - 1);
-                        if (insideOl) {
-                            d.lines.push_back(std::to_string(currentOlNum++) + ". " + liContent);
-                        } else {
-                            d.lines.push_back("• " + liContent);
-                        }
-                        pos = endLi + 5;
-                        continue;
-                    }
-
-                    pos = nextTag + 1;
-                }
+            if (d.mode == TuiMode::RichText) {
+                deserializeRawToRich(d, rawContent);
             } else {
                 std::stringstream ss(rawContent);
                 std::string line;
                 while (std::getline(ss, line)) {
                     if (!line.empty() && line.back() == '\r') line.pop_back();
-
-                    // Convert markdown bullet markers to TUI bullets on load
-                    if (d.mode == TuiMode::RichText && ext == "md") {
-                        if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
-                            line = "• " + line.substr(2);
-                        }
-                    }
                     d.lines.push_back(line);
                 }
+                if (d.lines.empty()) d.lines.push_back("");
             }
-            if (d.lines.empty()) d.lines.push_back("");
         }
 
         m_documents.push_back(d);
@@ -272,7 +418,6 @@ private:
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
 
-        // 1. Markdown Save (.md): Translate bullets and preserve lists
         if (doc().mode == TuiMode::RichText && ext == "md") {
             for (size_t i = 0; i < doc().lines.size(); ++i) {
                 const std::string &l = doc().lines[i];
@@ -290,7 +435,6 @@ private:
             return;
         }
 
-        // 2. HTML Save (.html / .htm): Group list items into valid <ul> and <ol> tags
         if (doc().mode == TuiMode::RichText && (ext == "html" || ext == "htm")) {
             bool hasHtmlRoot = false;
             for (const auto &l : doc().lines) {
@@ -313,13 +457,12 @@ private:
                 for (const auto &l : doc().lines) {
                     bool isBullet = (l.rfind("• ", 0) == 0);
 
-                    // Check for numbered list (e.g. "1. Item")
                     size_t dotPos = l.find(". ");
                     bool isNumbered = false;
                     if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
                         bool allDigits = true;
-                        for (size_t d = 0; d < dotPos; ++d) {
-                            if (!std::isdigit(static_cast<unsigned char>(l[d]))) {
+                        for (size_t di = 0; di < dotPos; ++di) {
+                            if (!std::isdigit(static_cast<unsigned char>(l[di]))) {
                                 allDigits = false;
                                 break;
                             }
@@ -360,7 +503,6 @@ private:
             }
         }
 
-        // 3. Fallback standard plaintext / source code serialization
         for (size_t i = 0; i < doc().lines.size(); ++i) {
             out << doc().lines[i];
             if (i + 1 < doc().lines.size()) out << (doc().eolFormat == "CRLF" ? "\r\n" : (doc().eolFormat == "CR" ? "\r" : "\n"));
@@ -384,10 +526,13 @@ private:
     }
 
     void promptOpen() {
-        std::string p = TuiDialogs::showPromptModal("Open File: ");
-        if (!p.empty()) {
-            loadFile(p);
-            m_activeDocIdx = m_documents.size() - 1;
+        std::string p = doc().filePath;
+        int filterType = 0;
+        if (TuiDialogs::showOpenFileModal(p, filterType)) {
+            if (!p.empty()) {
+                loadFile(p);
+                m_activeDocIdx = m_documents.size() - 1;
+            }
         }
     }
 
@@ -395,12 +540,12 @@ private:
         if (index >= m_documents.size()) return;
         if (m_documents[index].modified) {
             int res = TuiDialogs::showConfirmModal("Save Changes?", "Unsaved changes in " + m_documents[index].title + ". Save first?");
-            if (res == 1) { // Save
+            if (res == 1) {
                 size_t oldActive = m_activeDocIdx;
                 m_activeDocIdx = index;
                 saveCurrentFile();
                 m_activeDocIdx = oldActive;
-            } else if (res == 0) { // Cancel
+            } else if (res == 0) {
                 return;
             }
         }
@@ -425,10 +570,10 @@ private:
             return;
         }
         int res = TuiDialogs::showConfirmModal("Quit MicroWriter", "You have unsaved changes. Save before quitting?");
-        if (res == 1) { // Save
+        if (res == 1) {
             saveCurrentFile();
             m_running = false;
-        } else if (res == 2) { // Discard / No
+        } else if (res == 2) {
             m_running = false;
         }
     }
@@ -440,7 +585,7 @@ private:
     }
 
     void executeMenuAction(int menuIdx, int itemIdx) {
-        if (menuIdx == 0) { // File
+        if (menuIdx == 0) {
             if (itemIdx == 0) {
                 EditorDocument d;
                 if (m_defaultCodeMode) d.mode = TuiMode::Code;
@@ -450,7 +595,7 @@ private:
             else if (itemIdx == 1) promptOpen();
             else if (itemIdx == 2) saveCurrentFile();
             else if (itemIdx == 3) saveAsFile();
-            else if (itemIdx == 4) doc().mode = (doc().mode == TuiMode::RichText) ? TuiMode::Code : TuiMode::RichText;
+            else if (itemIdx == 4) switchDocumentMode((doc().mode == TuiMode::RichText) ? TuiMode::Code : TuiMode::RichText);
             else if (itemIdx == 5) { doc().encoding = "UTF-8"; doc().modified = true; }
             else if (itemIdx == 6) { doc().encoding = "Windows-1252"; doc().modified = true; }
             else if (itemIdx == 7) { doc().encoding = "ISO-8859-1"; doc().modified = true; }
@@ -458,7 +603,7 @@ private:
             else if (itemIdx == 9) { doc().eolFormat = "CRLF"; doc().modified = true; }
             else if (itemIdx == 10) { doc().eolFormat = "CR"; doc().modified = true; }
             else if (itemIdx == 11) promptQuit();
-        } else if (menuIdx == 1) { // Edit
+        } else if (menuIdx == 1) {
             if (itemIdx == 0) TuiActions::handleUndo(doc());
             else if (itemIdx == 1) TuiActions::handleRedo(doc());
             else if (itemIdx == 2) TuiActions::handleCutCopy(doc(), true);
@@ -466,7 +611,7 @@ private:
             else if (itemIdx == 4) TuiActions::handlePaste(doc());
             else if (itemIdx == 5) TuiActions::handleDuplicate(doc());
             else if (itemIdx == 6) TuiActions::handleFindReplace(doc());
-        } else if (menuIdx == 2) { // Format
+        } else if (menuIdx == 2) {
             if (doc().mode != TuiMode::RichText) return;
             if (itemIdx == 0) TuiActions::handleFontSelection(doc());
             else if (itemIdx == 1) TuiActions::handleFontSizeSelection(doc());
@@ -483,18 +628,19 @@ private:
                 doc().lines[doc().cursor.line].insert(doc().cursor.col, "<hr>");
                 doc().modified = true;
             }
-        } else if (menuIdx == 3) { // Tools
-            if (itemIdx == 0) TuiActions::handleToggleComment(doc());
-            else if (itemIdx == 1) TuiActions::handleMoveLine(doc(), true);
-            else if (itemIdx == 2) TuiActions::handleMoveLine(doc(), false);
-            else if (itemIdx == 3) TuiActions::handleIndent(doc(), true);
-            else if (itemIdx == 4) TuiActions::handleIndent(doc(), false);
-            else if (itemIdx == 5) TuiActions::handleStripBlankLines(doc());
-            else if (itemIdx == 6) TuiActions::handleSortLines(doc());
-            else if (itemIdx == 7) TuiActions::handleReverseLines(doc());
-            else if (itemIdx == 8) TuiActions::handleChangeCase(doc(), true);
-            else if (itemIdx == 9) TuiActions::handleChangeCase(doc(), false);
-        } else if (menuIdx == 4) { // Help
+        } else if (menuIdx == 3) {
+            if (itemIdx == 0) TuiActions::handleSpellCheck(doc());
+            else if (itemIdx == 1) TuiActions::handleToggleComment(doc());
+            else if (itemIdx == 2) TuiActions::handleMoveLine(doc(), true);
+            else if (itemIdx == 3) TuiActions::handleMoveLine(doc(), false);
+            else if (itemIdx == 4) TuiActions::handleIndent(doc(), true);
+            else if (itemIdx == 5) TuiActions::handleIndent(doc(), false);
+            else if (itemIdx == 6) TuiActions::handleStripBlankLines(doc());
+            else if (itemIdx == 7) TuiActions::handleSortLines(doc());
+            else if (itemIdx == 8) TuiActions::handleReverseLines(doc());
+            else if (itemIdx == 9) TuiActions::handleChangeCase(doc(), true);
+            else if (itemIdx == 10) TuiActions::handleChangeCase(doc(), false);
+        } else if (menuIdx == 4) {
             if (itemIdx == 0) {
                 TuiDialogs::showAboutModal();
             } else if (itemIdx == 1) {
@@ -547,7 +693,6 @@ private:
     }
 
     void handleMouseEvent(const MEVENT &event) {
-        // 1. Mouse Wheel Scrolling anywhere in the window
         #if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
         const mmask_t wheelUp = BUTTON4_PRESSED;
         const mmask_t wheelDown = BUTTON5_PRESSED;
@@ -579,7 +724,6 @@ private:
 
         int my = event.y, mx = event.x;
 
-        // Row 0: Menu Bar
         if (my == 0 && (event.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
             int offset = 2;
             for (size_t i = 0; i < m_topMenus.size(); ++i) {
@@ -587,7 +731,7 @@ private:
                 if (mx >= offset && mx < offset + menuLen) {
                     int sel = static_cast<int>(i);
                     TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                                         [this](int m, int it) { executeMenuAction(m, it); });
+                        [this](int m, int it) { executeMenuAction(m, it); });
                     return;
                 }
                 offset += menuLen;
@@ -595,7 +739,6 @@ private:
             return;
         }
 
-        // Row 1: Document Tabs (Double click = New Tab, Right click = Save/Close dialog)
         if (my == 1) {
             int tabOffset = 1;
             int clickedTab = -1;
@@ -608,17 +751,16 @@ private:
                 tabOffset += tabLen;
             }
 
-            // Right click: Offer Save & Close Context Modal
             if ((event.bstate & (BUTTON3_CLICKED | BUTTON3_PRESSED)) && clickedTab >= 0) {
                 int res = TuiDialogs::showTabContextMenuModal(m_documents[clickedTab].title);
-                if (res == 1) { // Save
+                if (res == 1) {
                     size_t oldActive = m_activeDocIdx;
                     m_activeDocIdx = clickedTab;
                     saveCurrentFile();
                     m_activeDocIdx = oldActive;
-                } else if (res == 2) { // Close
+                } else if (res == 2) {
                     closeDocument(clickedTab);
-                } else if (res == 3) { // Save & Close
+                } else if (res == 3) {
                     size_t oldActive = m_activeDocIdx;
                     m_activeDocIdx = clickedTab;
                     saveCurrentFile();
@@ -628,14 +770,12 @@ private:
                 return;
             }
 
-            // Left click or Double click
             if (event.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED)) {
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - m_lastClickTime).count();
 
                 if (clickedTab >= 0) {
                     if (clickedTab == m_lastClickTabIdx && elapsed < 350) {
-                        // Double click on tab: Spawn new tab!
                         EditorDocument d;
                         if (m_defaultCodeMode) d.mode = TuiMode::Code;
                         m_documents.push_back(d);
@@ -648,7 +788,6 @@ private:
                     m_lastClickTime = now;
                     return;
                 } else {
-                    // Double click on empty space of tab bar: also spawn new tab
                     if (m_lastClickTabIdx == -2 && elapsed < 350) {
                         EditorDocument d;
                         if (m_defaultCodeMode) d.mode = TuiMode::Code;
@@ -664,11 +803,9 @@ private:
             }
         }
 
-        // Row 2: Toolbar Buttons (No "New" button)
         if (my == 2 && (event.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
             int toolOffset = 1;
             if (doc().mode == TuiMode::RichText) {
-                // {"Save", "Open", "Font", "Size", "Bold", "Italic"}
                 for (size_t b = 0; b < TuiView::toolbarButtons.size(); ++b) {
                     int btnLen = static_cast<int>(TuiView::toolbarButtons[b].length()) + 4;
                     if (mx >= toolOffset && mx < toolOffset + btnLen) {
@@ -683,7 +820,6 @@ private:
                     toolOffset += btnLen + 1;
                 }
             } else {
-                // {"Save", "Open", "Comment //", "Duplicate", "Indent", "Unindent"}
                 for (size_t b = 0; b < TuiView::codeButtons.size(); ++b) {
                     int btnLen = static_cast<int>(TuiView::codeButtons[b].length()) + 4;
                     if (mx >= toolOffset && mx < toolOffset + btnLen) {
@@ -701,7 +837,6 @@ private:
             return;
         }
 
-        // Content Lines & Line Number Area Click / Drag
         int contentTop = 3;
         int contentBottom = LINES - 2;
         if ((my >= contentTop && my <= contentBottom) || m_isDragging) {
@@ -710,7 +845,6 @@ private:
             int targetLine = doc().scrollLine + (clampedY - contentTop);
             targetLine = std::clamp(targetLine, 0, static_cast<int>(doc().lines.size()) - 1);
 
-            // Gutter selection
             if (doc().mode == TuiMode::Code && mx < lineNumWidth) {
                 doc().selectionAnchor = {targetLine, 0};
                 doc().cursor.line = targetLine;
@@ -751,7 +885,6 @@ private:
             return;
         }
 
-        // F1 to F12
         if (ch == KEY_F(1)) { TuiDialogs::showAboutModal(); return; }
         if (ch == KEY_F(2)) {
             EditorDocument d;
@@ -766,48 +899,63 @@ private:
             }
             return;
         }
-        if (ch == KEY_F(4) || ch == 6) { // F4 or Ctrl + F (ASCII 6)
+        if (ch == KEY_F(4) || ch == 6) {
             TuiActions::handleFindReplace(doc());
             return;
         }
-        if (ch == KEY_F(5)) { doc().mode = TuiMode::RichText; return; }
-        if (ch == KEY_F(6)) { doc().mode = TuiMode::Code; return; }
-        if (ch == KEY_F(7) || ch == 15) { // F7 or Ctrl + O (ASCII 15)
+        if (ch == KEY_F(5)) { switchDocumentMode(TuiMode::RichText); return; }
+        if (ch == KEY_F(6)) { switchDocumentMode(TuiMode::Code); return; }
+        if (ch == KEY_F(7) || ch == 15) {
             promptOpen();
             return;
         }
-        if (ch == KEY_F(8) || ch == 19) { // F8 or Ctrl + S (ASCII 19)
+        if (ch == KEY_F(8) || ch == 19) {
             saveCurrentFile();
+            return;
+        }
+        if (ch == KEY_F(9)) {
+            TuiActions::handleSpellCheck(doc());
             return;
         }
         if (ch == KEY_F(10)) { exportDocument("ODF", "odt"); return; }
         if (ch == KEY_F(11)) {
             int sel = 0;
             TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                                 [this](int m, int it) { executeMenuAction(m, it); });
+                [this](int m, int it) { executeMenuAction(m, it); });
             return;
         }
-        if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; } // F12 or Ctrl + Q (ASCII 17)
+        if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; }
 
-        // Control shortcuts
-        if (ch == 3) { TuiActions::handleCutCopy(doc(), false); return; } // Ctrl + C
-        if (ch == 24) { TuiActions::handleCutCopy(doc(), true); return; } // Ctrl + X
-        if (ch == 4) { doc().hasSelection = false; cutEntireLine(); return; } // Ctrl + D
-        if (ch == 22) { TuiActions::handlePaste(doc()); return; } // Ctrl + V
-        if (ch == 1) { // Ctrl + A
+        if (ch == 27) {
+            nodelay(stdscr, TRUE);
+            int nextCh = getch();
+            nodelay(stdscr, FALSE);
+            if (nextCh == 's' || nextCh == 'S') {
+                TuiActions::handleSpellCheck(doc());
+                return;
+            }
+            if (nextCh != ERR) {
+                ungetch(nextCh);
+            }
+        }
+
+        if (ch == 3) { TuiActions::handleCutCopy(doc(), false); return; }
+        if (ch == 24) { TuiActions::handleCutCopy(doc(), true); return; }
+        if (ch == 4) { doc().hasSelection = false; cutEntireLine(); return; }
+        if (ch == 22) { TuiActions::handlePaste(doc()); return; }
+        if (ch == 1) {
             doc().selectionAnchor = {0, 0};
             doc().cursor.line = static_cast<int>(doc().lines.size()) - 1;
             doc().cursor.col = static_cast<int>(doc().lines.back().length());
             doc().hasSelection = true;
             return;
         }
-        if (ch == 18) { TuiActions::handleRedo(doc()); return; } // Ctrl + R
-        if (ch == 26 || ch == 5) { // Ctrl + Z (ASCII 26) or Ctrl + E (ASCII 5)
+        if (ch == 18) { TuiActions::handleRedo(doc()); return; }
+        if (ch == 26 || ch == 5) {
             TuiActions::handleUndo(doc());
             return;
         }
 
-        // Tab key: Indent selection or insert 4 spaces
         if (ch == 9) {
             if (doc().hasSelection) {
                 TuiActions::handleIndent(doc(), true);
@@ -820,13 +968,11 @@ private:
             return;
         }
 
-        // Shift+Tab / Backtab: Unindent
         if (ch == KEY_BTAB) {
             TuiActions::handleIndent(doc(), false);
             return;
         }
 
-        // Standard navigation
         if (ch == KEY_UP) {
             if (doc().cursor.line > 0) doc().cursor.line--;
             doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
@@ -857,9 +1003,7 @@ private:
             doc().cursor.col = 0;
         } else if (ch == KEY_END) {
             doc().cursor.col = static_cast<int>(doc().lines[doc().cursor.line].length());
-        } 
-        // Delete key (KEY_DC)
-        else if (ch == KEY_DC) {
+        } else if (ch == KEY_DC) {
             if (doc().hasSelection) {
                 TuiActions::handleDeleteSelection(doc());
                 return;
@@ -873,9 +1017,7 @@ private:
                 doc().lines.erase(doc().lines.begin() + doc().cursor.line + 1);
                 doc().modified = true;
             }
-        }
-        // Backspace key
-        else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
+        } else if (ch == KEY_BACKSPACE || ch == 127 || ch == '\b') {
             if (doc().hasSelection) {
                 TuiActions::handleDeleteSelection(doc());
                 return;
@@ -884,7 +1026,6 @@ private:
                 return;
             }
 
-            // Smart Backspace on List Markers (removes "• " or "X. " in one keystroke)
             if (doc().mode == TuiMode::RichText) {
                 std::string &cur = doc().lines[doc().cursor.line];
                 if (cur.rfind("• ", 0) == 0 && doc().cursor.col <= static_cast<int>(std::string("• ").length())) {
@@ -897,8 +1038,8 @@ private:
                 size_t dotPos = cur.find(". ");
                 if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
                     bool allDigits = true;
-                    for (size_t d = 0; d < dotPos; ++d) {
-                        if (!std::isdigit(static_cast<unsigned char>(cur[d]))) {
+                    for (size_t di = 0; di < dotPos; ++di) {
+                        if (!std::isdigit(static_cast<unsigned char>(cur[di]))) {
                             allDigits = false;
                             break;
                         }
@@ -938,23 +1079,20 @@ private:
                 std::string rem = cur.substr(doc().cursor.col);
                 std::string prefix = cur.substr(0, doc().cursor.col);
 
-                // Check for bullet list continuation
                 if (prefix == "• ") {
-                    // Empty bullet item: exit list mode and leave a blank line
                     doc().lines[doc().cursor.line] = "";
                     doc().cursor.col = 0;
                     doc().modified = true;
                     return;
                 }
 
-                // Check for numbered list continuation (e.g., "1. ", "2. ")
                 size_t dotPos = prefix.find(". ");
                 bool isNumbered = false;
                 int currentNum = 0;
                 if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
                     bool allDigits = true;
-                    for (size_t d = 0; d < dotPos; ++d) {
-                        if (!std::isdigit(static_cast<unsigned char>(prefix[d]))) {
+                    for (size_t di = 0; di < dotPos; ++di) {
+                        if (!std::isdigit(static_cast<unsigned char>(prefix[di]))) {
                             allDigits = false;
                             break;
                         }
@@ -963,7 +1101,6 @@ private:
                         isNumbered = true;
                         currentNum = std::atoi(prefix.substr(0, dotPos).c_str());
                         if (prefix == prefix.substr(0, dotPos + 2)) {
-                            // Empty numbered item: exit list mode and leave a blank line
                             doc().lines[doc().cursor.line] = "";
                             doc().cursor.col = 0;
                             doc().modified = true;
@@ -989,7 +1126,6 @@ private:
             if (doc().hasSelection) {
                 TuiActions::handleDeleteSelection(doc());
             } else if (doc().undoStack.empty() || ch == ' ' || doc().cursor.col == 0) {
-                // Ensure immediate baseline snapshot on line 1, as well as word boundary snapshots
                 doc().pushUndo();
             }
             doc().lines[doc().cursor.line].insert(doc().cursor.col, 1, static_cast<char>(ch));
