@@ -124,17 +124,17 @@ export capabilities.**
 ### Editing & Clipboard
 
 
-|Shortcut                 |Action                                               |
-|-------------------------|-----------------------------------------------------|
-|**Ctrl + X**             |**Cut Selection / Line (Syncs to system clipboard)** |
-|**Ctrl + C**             |**Copy Selection / Line (Syncs to system clipboard)**|
-|**Ctrl + V**             |**Paste (Reads from system clipboard: wl-paste / xclip)**|
-|**Ctrl + D**             |**Nano-style Cut Entire Line**                       |
-|**Ctrl + A**             |**Select All Text**                                  |
-|**Ctrl + E/Ctrl + Z**    |**Undo**                                             |
-|**Ctrl + R**             |**Redo**                                             |
-|**Tab**                  |**Indent 4 Spaces / Block Indent Selection**         |
-|***Shift + Tab (Backtab)\***\****|**Unindent Line / Selection**                        |
+|Shortcut             |Action                                               |
+|---------------------|-----------------------------------------------------|
+|**Ctrl + X**         |**Cut Selection / Line (Syncs to system clipboard)** |
+|**Ctrl + C**         |**Copy Selection / Line (Syncs to system clipboard)**|
+|**Ctrl + V**         |**Paste (Reads from system clipboard: wl-paste / xclip)**|
+|**Ctrl + D**         |**Nano-style Cut Entire Line**                       |
+|**Ctrl + A**         |**Select All Text**                                  |
+|**Ctrl + E/Ctrl + Z**|**Undo**                                             |
+|**Ctrl + R**         |**Redo**                                             |
+|**Tab**              |**Indent 4 Spaces / Block Indent Selection**         |
+|***Shift + Tab (Backtab)***|**Unindent Line / Selection**                        |
 
 ### Navigation & Dialogs
 
@@ -160,9 +160,8 @@ export capabilities.**
 |**Click**   |**Gutter (Code Mode)**|**Select entire line**                               |
 |**Mouse Wheel**|**Editor / Dialogs**|**Scroll document viewport or modal lists smoothly** |
 
-```bash
 **Build Requirements**
-```
+
 - **C++17 compatible compiler (GCC or Clang)**
 - **CMake 3.16 or higher**
 - **ncurses library (with wide-character/mouse support)**

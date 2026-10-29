@@ -1,5 +1,0 @@
-/media/DATA/DevProjects/microwriter/build/CMakeFiles/microwriter.dir
-/media/DATA/DevProjects/microwriter/build/CMakeFiles/edit_cache.dir
-/media/DATA/DevProjects/microwriter/build/CMakeFiles/rebuild_cache.dir
-/media/DATA/DevProjects/microwriter/build/CMakeFiles/microwriter_autogen_timestamp_deps.dir
-/media/DATA/DevProjects/microwriter/build/CMakeFiles/microwriter_autogen.dir

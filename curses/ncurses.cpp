@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <chrono>
 #include <thread>
+#include <regex>
 
 class NcursesEditor {
 public:
@@ -121,12 +122,87 @@ private:
         std::ostringstream out;
         if (ext == "md") {
             for (size_t i = 0; i < d.lines.size(); ++i) {
-                const std::string &l = d.lines[i];
+                std::string l = d.lines[i];
+
+                // 1. Bullets
                 if (l.rfind("• ", 0) == 0) {
-                    out << "- " << l.substr(std::string("• ").length());
-                } else {
-                    out << l;
+                    l = "- " + l.substr(std::string("• ").length());
                 }
+
+                // 2. Horizontal Rules
+                if (l.find("<hr") != std::string::npos) {
+                    l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "---");
+                }
+
+                // 3. Blockquotes
+                if (l.find("<blockquote") != std::string::npos) {
+                    l = std::regex_replace(l, std::regex("</?blockquote>"), "");
+                    size_t first = l.find_first_not_of(" \t");
+                    if (first != std::string::npos) {
+                        l = "> " + l.substr(first);
+                    } else {
+                        l = "> ";
+                    }
+                }
+
+                // 4. Tables (<table border="1"> ... </table>)
+                if (l.find("<table") != std::string::npos) {
+                    std::string tableContent;
+                    while (i < d.lines.size()) {
+                        tableContent += d.lines[i] + "\n";
+                        if (d.lines[i].find("</table>") != std::string::npos) break;
+                        ++i;
+                    }
+
+                    std::vector<std::vector<std::string>> rows;
+                    std::regex trRegex("<tr[^>]*>(.*?)</tr>");
+                    std::regex tdRegex("<td[^>]*>(.*?)</td>");
+
+                    auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
+                    auto trEnd = std::sregex_iterator();
+                    for (auto tri = trBegin; tri != trEnd; ++tri) {
+                        std::string rowHtml = (*tri)[1].str();
+                        std::vector<std::string> cells;
+                        auto tdBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), tdRegex);
+                        auto tdEnd = std::sregex_iterator();
+                        for (auto tdi = tdBegin; tdi != tdEnd; ++tdi) {
+                            cells.push_back((*tdi)[1].str());
+                        }
+                        if (!cells.empty()) rows.push_back(cells);
+                    }
+
+                    if (!rows.empty()) {
+                        size_t maxCols = 0;
+                        for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
+
+                        out << "\n";
+                        // Header row
+                        out << "|";
+                        for (size_t c = 0; c < maxCols; ++c) {
+                            std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
+                            out << " " << val << " |";
+                        }
+                        out << "\n|";
+                        // Separator row
+                        for (size_t c = 0; c < maxCols; ++c) {
+                            out << " --- |";
+                        }
+                        out << "\n";
+                        // Subsequent rows
+                        for (size_t r = 1; r < rows.size(); ++r) {
+                            out << "|";
+                            for (size_t c = 0; c < maxCols; ++c) {
+                                std::string val = (c < rows[r].size()) ? rows[r][c] : " ";
+                                out << " " << val << " |";
+                            }
+                            out << "\n";
+                        }
+                        out << "\n";
+                        continue;
+                    }
+                }
+
+                out << l;
                 if (i + 1 < d.lines.size()) out << "\n";
             }
             return out.str();
@@ -288,8 +364,19 @@ private:
                 if (!line.empty() && line.back() == '\r') line.pop_back();
 
                 if (ext == "md") {
+                    // 1. Bullets
                     if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
                         line = "• " + line.substr(2);
+                    }
+                    // 2. Horizontal Rules
+                    else if (line == "---" || line == "***" || line == "___") {
+                        line = "<hr>";
+                    }
+                    // 3. Blockquotes
+                    else if (line.rfind("> ", 0) == 0) {
+                        line = "<blockquote>" + line.substr(2) + "</blockquote>";
+                    } else if (line == ">") {
+                        line = "<blockquote></blockquote>";
                     }
                 }
                 d.lines.push_back(line);
@@ -301,7 +388,8 @@ private:
     void switchDocumentMode(TuiMode targetMode) {
         if (doc().mode == targetMode) return;
 
-        doc().pushUndo();
+        bool prevModified = doc().modified;
+
         if (targetMode == TuiMode::Code) {
             std::string raw = serializeDocToRaw(doc());
             doc().lines.clear();
@@ -327,7 +415,7 @@ private:
         doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
         doc().scrollLine = 0;
         doc().hasSelection = false;
-        doc().modified = true;
+        doc().modified = prevModified;
     }
 
     void loadFile(const std::string &path) {
@@ -419,17 +507,8 @@ private:
         }
 
         if (doc().mode == TuiMode::RichText && ext == "md") {
-            for (size_t i = 0; i < doc().lines.size(); ++i) {
-                const std::string &l = doc().lines[i];
-                if (l.rfind("• ", 0) == 0) {
-                    out << "- " << l.substr(std::string("• ").length());
-                } else {
-                    out << l;
-                }
-                if (i + 1 < doc().lines.size()) {
-                    out << (doc().eolFormat == "CRLF" ? "\r\n" : (doc().eolFormat == "CR" ? "\r" : "\n"));
-                }
-            }
+            std::string mdContent = serializeDocToRaw(doc());
+            out << mdContent;
             doc().modified = false;
             triggerSaveFlash();
             return;
