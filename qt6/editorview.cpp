@@ -26,6 +26,7 @@ EditorView::EditorView(QWidget *parent)
       m_eolFormat(EolLf),
       m_headerText(""),
       m_footerText(""),
+      m_rawMarkdownSource(""),
       m_selectedImagePos(-1),
       m_isResizingImage(false),
       m_dragWidth(0),
@@ -38,7 +39,6 @@ EditorView::EditorView(QWidget *parent)
     document()->rootFrame()->setFrameFormat(fmt);
 
     document()->setModified(false);
-
     viewport()->setMouseTracking(true);
 }
 
@@ -51,6 +51,10 @@ QString EditorView::getContentForSave() {
     QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
 
     if (m_filePath.endsWith(".md", Qt::CaseInsensitive)) {
+        if (!document()->isModified() && !m_rawMarkdownSource.isEmpty()) {
+            return m_rawMarkdownSource;
+        }
+
         content = toMarkdown();
 
         for (QTextBlock blk = document()->begin(); blk.isValid(); blk = blk.next()) {
@@ -78,11 +82,13 @@ QString EditorView::getContentForSave() {
         }
 
         content.replace(QRegularExpression("(</img>|<img[^>]+/>)\\s*\\n\\s*(<img)"), "\\1 \\2");
+        m_rawMarkdownSource = content;
+        return content;
     } else if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || m_filePath.endsWith(".htm", Qt::CaseInsensitive) || m_filePath.isEmpty()) {
         content = toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
 
-        QRegularExpression imgTagRe("<img[^>]+src=\"([^\">]+)\"[^>]*>");
+        QRegularExpression imgTagRe("<img[^>]+src=\"([^\"]+)\"[^>]*>");
         QRegularExpressionMatchIterator iter = imgTagRe.globalMatch(content);
         QMap<QString, QString> replacements;
 
@@ -108,10 +114,13 @@ QString EditorView::getContentForSave() {
 
 void EditorView::setContent(const QString &content, const QString &fileName) {
     m_filePath = fileName;
-    if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
-        setHtml(content);
-    } else if (fileName.endsWith(".md", Qt::CaseInsensitive)) {
+    m_rawMarkdownSource.clear();
+
+    if (fileName.endsWith(".md", Qt::CaseInsensitive)) {
+        m_rawMarkdownSource = content;
         setMarkdown(content);
+    } else if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
+        setHtml(content);
     } else if (fileName.isEmpty()) {
         if (content.contains("<html", Qt::CaseInsensitive) || content.contains("<!DOCTYPE", Qt::CaseInsensitive) || content.contains("<p>", Qt::CaseInsensitive)) {
             setHtml(content);
@@ -121,6 +130,7 @@ void EditorView::setContent(const QString &content, const QString &fileName) {
     } else {
         setPlainText(content);
     }
+
     m_selectedImagePos = -1;
     document()->setModified(false);
 }
@@ -372,7 +382,7 @@ void EditorView::contextMenuEvent(QContextMenuEvent *event) {
             QMenu *spellMenu = new QMenu(tr("Spelling Suggestions"), menu);
             for (const QString &s : suggestions) {
                 QAction *act = spellMenu->addAction(s);
-                connect(act, &QAction::triggered, this, [this, cursor, s](){
+                connect(act, &QAction::triggered, this, [this, cursor, s]() {
                     QTextCursor c = cursor;
                     c.insertText(s);
                 });

@@ -72,6 +72,9 @@ public:
     qreal leftMarginPixels() const;
     qreal rightMarginPixels() const;
 
+    QString rawMarkdownSource() const { return m_rawMarkdownSource; }
+    void setRawMarkdownSource(const QString &text) { m_rawMarkdownSource = text; }
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void contextMenuEvent(QContextMenuEvent *event) override;
@@ -90,6 +93,7 @@ private:
 
     QString m_headerText;
     QString m_footerText;
+    QString m_rawMarkdownSource;
 
     QStringList getAspellSuggestions(const QString &word);
 
