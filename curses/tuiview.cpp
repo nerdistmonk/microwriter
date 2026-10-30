@@ -16,6 +16,80 @@ const std::vector<std::string> codeButtons = {
     "Save", "Open", "Comment //", "Duplicate", "Indent", "Unindent"
 };
 
+namespace {
+
+static std::vector<std::string> wrapDisplaySegments(const std::string &line, int wrapWidth) {
+    std::vector<std::string> wrapped;
+    if (wrapWidth <= 0 || line.empty()) {
+        wrapped.push_back(line);
+        return wrapped;
+    }
+
+    size_t start = 0;
+    while (start < line.size()) {
+        size_t end = std::min(line.size(), start + static_cast<size_t>(wrapWidth));
+        if (end >= line.size()) {
+            wrapped.push_back(line.substr(start));
+            break;
+        }
+
+        size_t split = end;
+        while (split > start && !std::isspace(static_cast<unsigned char>(line[split - 1]))) {
+            --split;
+        }
+        if (split == start) {
+            split = end;
+        }
+
+        wrapped.push_back(line.substr(start, split - start));
+        start = split;
+        while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
+            ++start;
+        }
+    }
+
+    if (wrapped.empty()) {
+        wrapped.push_back(line);
+    }
+    return wrapped;
+}
+
+static int effectiveWrapWidth(const EditorDocument &doc, int lineNumWidth) {
+    if (doc.wrapMode == TuiWrapMode::Off) {
+        return 0;
+    }
+
+    const int usable = std::max(20, COLS - lineNumWidth - 2);
+    if (doc.wrapWidth > 0) {
+        return std::min(doc.wrapWidth, usable);
+    }
+    return usable;
+}
+
+static std::vector<int> buildWrapStarts(const std::vector<std::string> &lines, int wrapWidth) {
+    std::vector<int> starts;
+    starts.reserve(lines.size() + 1);
+    starts.push_back(0);
+
+    int current = 0;
+    for (const std::string &line : lines) {
+        const auto segments = wrapDisplaySegments(line, wrapWidth);
+        current += static_cast<int>(segments.size());
+        starts.push_back(current);
+    }
+
+    return starts;
+}
+
+static int wrappedRowForCursor(const std::string &line, int cursorCol, int wrapWidth) {
+    if (wrapWidth <= 0 || cursorCol <= 0) {
+        return 0;
+    }
+    return cursorCol / wrapWidth;
+}
+
+} // namespace
+
 static void highlightCodeLine(int screenY, int startX, const std::string &line, int initialBracketDepth) {
     static const std::unordered_set<std::string> keywords = {
         "char", "class", "const", "double", "enum", "explicit", "friend", "inline",
@@ -33,14 +107,12 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
     size_t i = 0;
 
     while (i < line.length() && startX + static_cast<int>(i) < COLS) {
-        // Comment: //
         if (i + 1 < line.length() && line[i] == '/' && line[i + 1] == '/') {
             attron(COLOR_PAIR(4) | A_DIM);
             mvprintw(screenY, startX + static_cast<int>(i), "%s", line.substr(i).c_str());
             attroff(COLOR_PAIR(4) | A_DIM);
             break;
         }
-        // Comment: #
         if (line[i] == '#') {
             attron(COLOR_PAIR(4) | A_DIM);
             mvprintw(screenY, startX + static_cast<int>(i), "%s", line.substr(i).c_str());
@@ -48,7 +120,6 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
             break;
         }
 
-        // Strings
         if (line[i] == '"' || line[i] == '\'') {
             char q = line[i];
             size_t j = i + 1;
@@ -68,7 +139,6 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
             continue;
         }
 
-        // Rainbow bracket pairs
         if (line[i] == '(' || line[i] == '{' || line[i] == '[') {
             int pairIdx = bracketColorPairs[depth % 5];
             attron(COLOR_PAIR(pairIdx) | A_BOLD);
@@ -88,7 +158,6 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
             continue;
         }
 
-        // Numbers
         if (std::isdigit(static_cast<unsigned char>(line[i])) || (line[i] == '-' && i + 1 < line.length() && std::isdigit(static_cast<unsigned char>(line[i + 1])))) {
             size_t j = i + 1;
             while (j < line.length() && (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '.')) {
@@ -103,7 +172,6 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
             continue;
         }
 
-        // Identifiers / Keywords
         if (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_') {
             size_t j = i + 1;
             while (j < line.length() && (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '_')) {
@@ -141,7 +209,6 @@ void render(
 
     erase();
 
-    // 1. Top Menu Bar (Solid band across full terminal width)
     attron(COLOR_PAIR(1));
     move(0, 0);
     for (int c = 0; c < COLS; ++c) addch(' ');
@@ -154,20 +221,17 @@ void render(
     }
     attroff(COLOR_PAIR(1));
 
-    // 2. Tabs Row
     move(1, 0);
     clrtoeol();
     int tabOffset = 1;
     for (size_t i = 0; i < documents.size(); ++i) {
         bool active = (i == activeDocIdx);
-        // Active tab matches line numbers color: COLOR_PAIR(3) (Yellow)
         if (active) attron(COLOR_PAIR(3) | A_BOLD);
         mvprintw(1, tabOffset, "[ %zu: %s%s ]", i + 1, documents[i].title.c_str(), documents[i].modified ? " *" : "");
         if (active) attroff(COLOR_PAIR(3) | A_BOLD);
         tabOffset += static_cast<int>(documents[i].title.length()) + 8;
     }
 
-    // 3. Tool Bar Row
     int contentTop = 2;
     move(contentTop, 0);
     clrtoeol();
@@ -176,22 +240,25 @@ void render(
     int toolOffset = 1;
     for (size_t b = 0; b < buttons.size(); ++b) {
         bool isSave = (buttons[b] == "Save");
-        int pair = (isSave && saveFlash) ? 3 : 2; // Flash Save button yellow (COLOR_PAIR(3))
+        int pair = (isSave && saveFlash) ? 3 : 2;
         attron(COLOR_PAIR(pair) | (saveFlash && isSave ? A_BOLD | A_REVERSE : 0));
         mvprintw(contentTop, toolOffset, "[ %s ]", buttons[b].c_str());
         attroff(COLOR_PAIR(pair) | (saveFlash && isSave ? A_BOLD | A_REVERSE : 0));
         toolOffset += static_cast<int>(buttons[b].length()) + 5;
     }
-    contentTop++; // Row 3 is content area
+    contentTop++;
 
-    // 4. Viewport lines
     int contentHeight = LINES - contentTop - 1;
-    int scrollLine = doc.scrollLine;
     int lineNumWidth = (doc.mode == TuiMode::Code) ? 6 : 0;
+    int wrapWidth = effectiveWrapWidth(doc, lineNumWidth);
+    bool useWrap = (doc.wrapMode != TuiWrapMode::Off && wrapWidth > 0);
+
+    const char *wrapLabel = (doc.wrapMode == TuiWrapMode::Off) ? "Off" :
+                            (doc.wrapMode == TuiWrapMode::Soft ? "Soft" : "Hard");
 
     int runningDepth = 0;
     if (doc.mode == TuiMode::Code) {
-        for (int l = 0; l < scrollLine && l < static_cast<int>(doc.lines.size()); ++l) {
+        for (int l = 0; l < doc.scrollLine && l < static_cast<int>(doc.lines.size()); ++l) {
             for (char c : doc.lines[l]) {
                 if (c == '(' || c == '{' || c == '[') runningDepth++;
                 else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
@@ -199,47 +266,86 @@ void render(
         }
     }
 
+    std::vector<int> wrapStarts;
+    int scrollBase = doc.scrollLine;
+    if (useWrap) {
+        wrapStarts = buildWrapStarts(doc.lines, wrapWidth);
+        if (!wrapStarts.empty() && static_cast<size_t>(doc.scrollLine) < wrapStarts.size()) {
+            scrollBase = wrapStarts[std::min(doc.scrollLine, static_cast<int>(wrapStarts.size() - 1))];
+        }
+    }
+
     for (int y = 0; y < contentHeight; ++y) {
-        int lineIdx = scrollLine + y;
         int screenY = contentTop + y;
         move(screenY, 0);
         clrtoeol();
 
-        if (lineIdx < static_cast<int>(doc.lines.size())) {
-            if (doc.mode == TuiMode::Code) {
+        int rowIndex = scrollBase + y;
+        int logicalLine = doc.scrollLine;
+        std::string displayText;
+
+        if (useWrap) {
+            if (!wrapStarts.empty()) {
+                int displayRow = rowIndex;
+                while (logicalLine + 1 < static_cast<int>(doc.lines.size()) && displayRow >= wrapStarts[logicalLine + 1]) {
+                    ++logicalLine;
+                }
+                if (logicalLine >= static_cast<int>(doc.lines.size())) {
+                    continue;
+                }
+
+                const auto segments = wrapDisplaySegments(doc.lines[logicalLine], wrapWidth);
+                int segmentIndex = displayRow - wrapStarts[logicalLine];
+                if (segmentIndex >= 0 && segmentIndex < static_cast<int>(segments.size())) {
+                    displayText = segments[segmentIndex];
+                } else {
+                    continue;
+                }
+            }
+        } else if (logicalLine < static_cast<int>(doc.lines.size())) {
+            logicalLine = doc.scrollLine + y;
+            if (logicalLine < static_cast<int>(doc.lines.size())) {
+                displayText = doc.lines[logicalLine];
+            }
+        }
+
+        if (logicalLine >= static_cast<int>(doc.lines.size())) {
+            continue;
+        }
+
+        if (doc.mode == TuiMode::Code && !useWrap) {
+            if (doc.scrollLine + y < static_cast<int>(doc.lines.size())) {
                 attron(COLOR_PAIR(3));
-                mvprintw(screenY, 0, "%4d |", lineIdx + 1);
+                mvprintw(screenY, 0, "%4d |", doc.scrollLine + y + 1);
                 attroff(COLOR_PAIR(3));
             }
+        }
 
-            const std::string &l = doc.lines[lineIdx];
+        if (doc.mode == TuiMode::Code && useWrap) {
+            if (logicalLine < static_cast<int>(doc.lines.size())) {
+                attron(COLOR_PAIR(3));
+                mvprintw(screenY, 0, "%4d |", logicalLine + 1);
+                attroff(COLOR_PAIR(3));
+            }
+        }
 
-            if (doc.hasSelection) {
-                for (int x = 0; x < static_cast<int>(l.length()) && x + lineNumWidth < COLS; ++x) {
-                    TextPosition p{lineIdx, x}, s = doc.selectionAnchor, e = doc.cursor;
-                    if (e < s) std::swap(s, e);
-                    bool inSel = (!(p < s) && (p < e));
-                    if (inSel) attron(COLOR_PAIR(5));
-                    mvaddch(screenY, lineNumWidth + x, l[x]);
-                    if (inSel) attroff(COLOR_PAIR(5));
-                }
-            } else {
-                if (doc.mode == TuiMode::Code) {
-                    highlightCodeLine(screenY, lineNumWidth, l, runningDepth);
-                    for (char c : l) {
-                        if (c == '(' || c == '{' || c == '[') runningDepth++;
-                        else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
-                    }
-                } else {
-                    for (int x = 0; x < static_cast<int>(l.length()) && x + lineNumWidth < COLS; ++x) {
-                        mvaddch(screenY, lineNumWidth + x, l[x]);
-                    }
-                }
+        if (displayText.empty()) {
+            continue;
+        }
+
+        if (doc.mode == TuiMode::Code) {
+            highlightCodeLine(screenY, lineNumWidth, displayText, runningDepth);
+            for (char c : displayText) {
+                if (c == '(' || c == '{' || c == '[') runningDepth++;
+                else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
+            }
+        } else {
+            for (int x = 0; x < static_cast<int>(displayText.length()) && x + lineNumWidth < COLS; ++x) {
+                mvaddch(screenY, lineNumWidth + x, displayText[x]);
             }
         }
     }
 
-    // 5. Status Bar Row (Solid band across full terminal width)
     attron(COLOR_PAIR(2));
     move(LINES - 1, 0);
     for (int c = 0; c < COLS; ++c) addch(' ');
@@ -252,17 +358,23 @@ void render(
         while (ss >> w) words++;
     }
 
-    mvprintw(LINES - 1, 1, "Mode: %s | L:%d C:%d | W:%zu C:%zu | %s | %s | F1:Help F8/Ctrl+S:Save F11:Menu F12:Quit",
+    mvprintw(LINES - 1, 1,
+             "Mode: %s | L:%d C:%d | W:%zu C:%zu | %s | %s | Wrap:%s | F1:Help F8/Ctrl+S:Save F11:Menu F12:Quit",
              doc.mode == TuiMode::RichText ? "Rich" : "Code",
              doc.cursor.line + 1, doc.cursor.col + 1, words, chars,
-             doc.encoding.c_str(), doc.eolFormat.c_str());
+             doc.encoding.c_str(), doc.eolFormat.c_str(), wrapLabel);
     attroff(COLOR_PAIR(2));
 
-    // Place physical terminal cursor if within visible viewport
-    int screenCursorY = contentTop + (doc.cursor.line - scrollLine);
+    int screenCursorY = contentTop + (doc.cursor.line - doc.scrollLine);
+    if (useWrap) {
+        int visualRow = wrapStarts.empty() ? 0 : wrapStarts[std::min(doc.cursor.line, static_cast<int>(wrapStarts.size() - 1))];
+        visualRow += wrappedRowForCursor(doc.lines[std::min(doc.cursor.line, static_cast<int>(doc.lines.size() - 1))], doc.cursor.col, wrapWidth);
+        screenCursorY = contentTop + (visualRow - scrollBase);
+    }
+
     if (screenCursorY >= contentTop && screenCursorY < contentTop + contentHeight) {
         curs_set(1);
-        move(screenCursorY, lineNumWidth + doc.cursor.col);
+        move(screenCursorY, lineNumWidth + std::min(doc.cursor.col, static_cast<int>(COLS - lineNumWidth - 1)));
     } else {
         curs_set(0);
     }

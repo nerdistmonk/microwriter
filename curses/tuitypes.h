@@ -9,6 +9,12 @@ enum class TuiMode {
     Code
 };
 
+enum class TuiWrapMode {
+    Off,
+    Soft,
+    Hard
+};
+
 struct TextPosition {
     int line = 0;
     int col = 0;
@@ -30,6 +36,8 @@ struct EditorDocument {
     std::vector<std::string> lines = {""};
     bool modified = false;
     TuiMode mode = TuiMode::RichText;
+    TuiWrapMode wrapMode = TuiWrapMode::Off;
+    int wrapWidth = 0;
     std::string eolFormat = "LF";
     std::string encoding = "UTF-8";
 

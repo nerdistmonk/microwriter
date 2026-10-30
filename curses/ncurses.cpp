@@ -96,7 +96,7 @@ private:
             "New", "Open", "Save", "Save As", "Switch Mode",
             "Encoding: UTF-8", "Encoding: ANSI (Windows-1252)", "Encoding: ISO-8859-1",
             "EOL: Unix (LF)", "EOL: Windows (CRLF)", "EOL: Mac (CR)",
-            "Exit"
+            "Wrap: Off", "Wrap: Soft", "Wrap: Hard", "Exit"
         },
         {"Undo", "Redo", "Cut", "Copy", "Paste", "Duplicate Line/Block", "Find & Replace"},
         {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line"},
@@ -398,10 +398,44 @@ private:
         if (d.lines.empty()) d.lines.push_back("");
     }
 
+    void applyWrapMode(TuiWrapMode mode) {
+        doc().wrapMode = mode;
+        if (mode == TuiWrapMode::Hard) {
+            std::vector<std::string> wrapped;
+            const int width = doc().wrapWidth > 0 ? std::min(doc().wrapWidth, std::max(20, COLS - 10)) : std::max(20, COLS - 10);
+            for (const auto &line : doc().lines) {
+                if (line.empty()) {
+                    wrapped.push_back("");
+                    continue;
+                }
+
+                size_t start = 0;
+                while (start < line.size()) {
+                    size_t end = std::min(line.size(), start + static_cast<size_t>(width));
+                    if (end >= line.size()) {
+                        wrapped.push_back(line.substr(start));
+                        break;
+                    }
+                    size_t split = end;
+                    while (split > start && !std::isspace(static_cast<unsigned char>(line[split - 1]))) {
+                        --split;
+                    }
+                    if (split == start) split = end;
+                    wrapped.push_back(line.substr(start, split - start));
+                    start = split;
+                    while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
+                        ++start;
+                    }
+                }
+            }
+            doc().lines = wrapped.empty() ? std::vector<std::string>{""} : wrapped;
+            doc().modified = true;
+        }
+    }
+
     void switchDocumentMode(TuiMode targetMode) {
         if (doc().mode == targetMode) return;
 
-        // Code format lockout: never switch source code or config files to RichText
         if (targetMode == TuiMode::RichText && isDocStrictCode(doc())) {
             return;
         }
@@ -492,7 +526,7 @@ private:
     void saveAsFile() {
         std::string curPath = doc().filePath;
         if (curPath.empty()) curPath = "untitled";
-        
+
         int fmtType = 0;
         if (curPath.length() >= 3 && curPath.compare(curPath.length() - 3, 3, ".md") == 0) {
             fmtType = 1;
@@ -713,7 +747,10 @@ private:
             else if (itemIdx == 8) { doc().eolFormat = "LF"; doc().modified = true; }
             else if (itemIdx == 9) { doc().eolFormat = "CRLF"; doc().modified = true; }
             else if (itemIdx == 10) { doc().eolFormat = "CR"; doc().modified = true; }
-            else if (itemIdx == 11) promptQuit();
+            else if (itemIdx == 11) { applyWrapMode(TuiWrapMode::Off); }
+            else if (itemIdx == 12) { applyWrapMode(TuiWrapMode::Soft); }
+            else if (itemIdx == 13) { applyWrapMode(TuiWrapMode::Hard); }
+            else if (itemIdx == 14) promptQuit();
         } else if (menuIdx == 1) {
             if (itemIdx == 0) TuiActions::handleUndo(doc());
             else if (itemIdx == 1) TuiActions::handleRedo(doc());
