@@ -30,6 +30,7 @@
 #include <QSignalBlocker>
 #include <QSet>
 #include <QTextDocument>
+#include <QCheckBox>
 
 static const QSet<QString> g_codeExtensions = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json",
@@ -342,9 +343,27 @@ void MicroWriter::saveAsFile() {
         "All Files (*.*)"
     });
 
+    QCheckBox *stripBox = new QCheckBox(tr("Strip Markdown/HTML formatting"), &dialog);
+    stripBox->setChecked(false);
+
+    auto updateStripBox = [stripBox, &dialog]() {
+        QString sel = dialog.selectedNameFilter();
+        stripBox->setEnabled(sel.contains("*.txt"));
+    };
+    updateStripBox();
+    connect(&dialog, &QFileDialog::filterSelected, this, [updateStripBox](const QString &){
+        updateStripBox();
+    });
+
+    QGridLayout *layout = qobject_cast<QGridLayout*>(dialog.layout());
+    if (layout) {
+        layout->addWidget(stripBox, layout->rowCount(), 0, 1, -1);
+    }
+
     if (dialog.exec() == QDialog::Accepted) {
         QString fileName = dialog.selectedFiles().first();
         QString selectedFilter = dialog.selectedNameFilter();
+        bool doStrip = stripBox->isChecked() && selectedFilter.contains("*.txt");
 
         QFileInfo fileInfo(fileName);
         if (fileInfo.suffix().isEmpty()) {
@@ -361,7 +380,6 @@ void MicroWriter::saveAsFile() {
         if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
             QString bufferText = codeEd->getRawPlainText();
             if ((newExt == "html" || newExt == "htm") && (oldExt == "md" || !bufferText.contains("<html", Qt::CaseInsensitive))) {
-                // Buffer is Markdown or plain text, convert to clean HTML
                 QTextDocument tempDoc;
                 tempDoc.setMarkdown(bufferText);
                 QString htmlOutput = tempDoc.toHtml();
@@ -374,7 +392,6 @@ void MicroWriter::saveAsFile() {
                 updateWindowTitleAndStats();
                 return;
             } else if (newExt == "md" && (oldExt == "html" || oldExt == "htm" || bufferText.contains("<html", Qt::CaseInsensitive))) {
-                // Buffer is HTML, convert to clean Markdown
                 QTextDocument tempDoc;
                 tempDoc.setHtml(bufferText);
                 QString mdOutput = tempDoc.toMarkdown();
@@ -385,7 +402,45 @@ void MicroWriter::saveAsFile() {
                 tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
                 updateWindowTitleAndStats();
                 return;
+            } else if (newExt == "txt") {
+                QString txtOutput = bufferText;
+                if (doStrip) {
+                    QTextDocument tempDoc;
+                    if (bufferText.contains("<html", Qt::CaseInsensitive) || bufferText.contains("<!DOCTYPE", Qt::CaseInsensitive) || bufferText.contains("<p>", Qt::CaseInsensitive)) {
+                        tempDoc.setHtml(bufferText);
+                    } else {
+                        tempDoc.setMarkdown(bufferText);
+                    }
+                    txtOutput = tempDoc.toPlainText();
+                }
+                editor->setFilePath(fileName);
+                writeFile(fileName, txtOutput);
+                codeEd->setContent(txtOutput, fileName);
+                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
+                updateWindowTitleAndStats();
+                return;
             }
+        }
+
+        if (newExt == "txt") {
+            QString output;
+            if (doStrip) {
+                output = editor->getRawPlainText();
+            } else {
+                EditorView *richEd = dynamic_cast<EditorView*>(editor);
+                if (richEd && !richEd->rawMarkdownSource().isEmpty()) {
+                    output = richEd->rawMarkdownSource();
+                } else if (richEd) {
+                    output = richEd->toHtml();
+                } else {
+                    output = editor->getContentForSave();
+                }
+            }
+            editor->setFilePath(fileName);
+            writeFile(fileName, output);
+            tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
+            updateWindowTitleAndStats();
+            return;
         }
 
         editor->setFilePath(fileName);

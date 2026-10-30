@@ -293,7 +293,8 @@ private:
             fmtType = 2;
         }
 
-        if (!TuiDialogs::showSaveAsModal(curPath, fmtType)) {
+        bool stripFormatting = false;
+        if (!TuiDialogs::showSaveAsModal(curPath, fmtType, stripFormatting)) {
             return;
         }
 
@@ -301,7 +302,7 @@ private:
         size_t lastSlash = curPath.find_last_of("/\\");
         doc().title = (lastSlash == std::string::npos) ? curPath : curPath.substr(lastSlash + 1);
 
-        writeDocumentToFile(curPath, fmtType);
+        writeDocumentToFile(curPath, fmtType, stripFormatting);
     }
 
     void saveCurrentFile() {
@@ -309,10 +310,10 @@ private:
             saveAsFile();
             return;
         }
-        writeDocumentToFile(doc().filePath, -1);
+        writeDocumentToFile(doc().filePath, -1, false);
     }
 
-    void writeDocumentToFile(const std::string &path, int targetFormat = -1) {
+    void writeDocumentToFile(const std::string &path, int targetFormat = -1, bool stripFormatting = false) {
         std::ofstream out(path, std::ios::binary);
         if (!out.is_open()) return;
 
@@ -372,7 +373,16 @@ private:
                 finalOutput = TuiConverter::serializeLinesToMarkdown(doc().lines);
             }
         } else if (savingAsTxt) {
-            finalOutput = TuiConverter::serializeLinesToPlainText(doc().lines);
+            if (stripFormatting) {
+                finalOutput = TuiConverter::serializeLinesToPlainText(doc().lines);
+            } else {
+                std::ostringstream ss;
+                for (size_t i = 0; i < doc().lines.size(); ++i) {
+                    ss << doc().lines[i];
+                    if (i + 1 < doc().lines.size()) ss << "\n";
+                }
+                finalOutput = ss.str();
+            }
         } else {
             std::ostringstream ss;
             for (size_t i = 0; i < doc().lines.size(); ++i) {
@@ -384,7 +394,7 @@ private:
 
         std::string eolStr = (doc().eolFormat == "CRLF") ? "\r\n" : ((doc().eolFormat == "CR") ? "\r" : "\n");
         if (eolStr != "\n") {
-            finalOutput = std::regex_replace(finalOutput, std::regex("\r\n|\r|\n"), eolStr);
+            finalOutput = std::regex_replace(finalOutput, std::regex("\\r\\n|\\r|\\n"), eolStr);
         }
 
         out << finalOutput;

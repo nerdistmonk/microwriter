@@ -170,9 +170,9 @@ static void updateExtensionForFormat(std::string &name, int newFmt) {
     }
 }
 
-bool showSaveAsModal(std::string &filePath, int &formatType) {
-    int width = 60;
-    int height = 9;
+bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatting) {
+    int width = 64;
+    int height = 11;
     int startY = (LINES - height) / 2;
     int startX = (COLS - width) / 2;
 
@@ -180,10 +180,11 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
     wbkgd(win, COLOR_PAIR(6));
     keypad(win, TRUE);
 
-    int focusField = 0; // 0 = File name input, 1 = Format selector
+    int focusField = 0; // 0 = File name input, 1 = Format selector, 2 = Strip formatting toggle
     std::string inputName = filePath;
     int currentFmt = formatType; // 0 = HTML (.html), 1 = Markdown (.md), 2 = Plain Text (.txt)
     if (currentFmt < 0 || currentFmt > 2) currentFmt = 0;
+    bool doStrip = stripFormatting;
 
     int maxInputLen = width - 16;
 
@@ -217,8 +218,19 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
         }
         if (focusField == 1) wattroff(win, A_REVERSE);
 
-        // Row 7: Helper instructions
-        mvwprintw(win, 7, 3, "Tab: Switch | Space/Arrows: Toggle | Enter: Save");
+        // Row 7: Strip Formatting Checkbox (active when saving as .txt)
+        if (currentFmt == 2) {
+            if (focusField == 2) wattron(win, A_REVERSE);
+            mvwprintw(win, 7, 3, "[%c] Strip HTML/Markdown tags & formatting", doStrip ? 'X' : ' ');
+            if (focusField == 2) wattroff(win, A_REVERSE);
+        } else {
+            wattron(win, A_DIM);
+            mvwprintw(win, 7, 3, "[ ] Strip formatting (only for .txt)");
+            wattroff(win, A_DIM);
+        }
+
+        // Row 9: Helper instructions
+        mvwprintw(win, 9, 3, "Tab: Switch | Space: Toggle | Enter: Save | Esc: Cancel");
 
         wrefresh(win);
         int ch = wgetch(win);
@@ -232,6 +244,9 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
                     focusField = 1;
                     currentFmt = (currentFmt + 1) % 3;
                     updateExtensionForFormat(inputName, currentFmt);
+                } else if (localY == 7 && currentFmt == 2) {
+                    focusField = 2;
+                    doStrip = !doStrip;
                 }
             }
             continue;
@@ -243,11 +258,15 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
         }
 
         if (ch == '\t' || ch == KEY_DOWN) {
-            focusField = (focusField == 0) ? 1 : 0;
+            if (focusField == 0) focusField = 1;
+            else if (focusField == 1) focusField = (currentFmt == 2) ? 2 : 0;
+            else focusField = 0;
             continue;
         }
         if (ch == KEY_BTAB || ch == KEY_UP) {
-            focusField = (focusField == 1) ? 0 : 1;
+            if (focusField == 2) focusField = 1;
+            else if (focusField == 1) focusField = 0;
+            else focusField = (currentFmt == 2) ? 2 : 1;
             continue;
         }
 
@@ -264,12 +283,20 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
             }
         }
 
+        if (focusField == 2 && currentFmt == 2) {
+            if (ch == ' ') {
+                doStrip = !doStrip;
+                continue;
+            }
+        }
+
         if (ch == 10 || ch == KEY_ENTER) {
             updateExtensionForFormat(inputName, currentFmt);
 
             delwin(win);
             filePath = inputName;
             formatType = currentFmt;
+            stripFormatting = (currentFmt == 2) ? doStrip : false;
             return true;
         }
 
