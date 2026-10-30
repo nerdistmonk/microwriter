@@ -29,6 +29,7 @@
 #include <QRegularExpression>
 #include <QSignalBlocker>
 #include <QSet>
+#include <QTextDocument>
 
 static const QSet<QString> g_codeExtensions = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json",
@@ -353,6 +354,40 @@ void MicroWriter::saveAsFile() {
             else fileName += ".html";
         }
 
+        QString oldExt = QFileInfo(editor->filePath()).suffix().toLower();
+        QString newExt = QFileInfo(fileName).suffix().toLower();
+
+        // If saving from CodeEditorView into a different format
+        if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
+            QString bufferText = codeEd->getRawPlainText();
+            if ((newExt == "html" || newExt == "htm") && (oldExt == "md" || !bufferText.contains("<html", Qt::CaseInsensitive))) {
+                // Buffer is Markdown or plain text, convert to clean HTML
+                QTextDocument tempDoc;
+                tempDoc.setMarkdown(bufferText);
+                QString htmlOutput = tempDoc.toHtml();
+                htmlOutput.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
+                
+                editor->setFilePath(fileName);
+                writeFile(fileName, htmlOutput);
+                codeEd->setContent(htmlOutput, fileName);
+                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
+                updateWindowTitleAndStats();
+                return;
+            } else if (newExt == "md" && (oldExt == "html" || oldExt == "htm" || bufferText.contains("<html", Qt::CaseInsensitive))) {
+                // Buffer is HTML, convert to clean Markdown
+                QTextDocument tempDoc;
+                tempDoc.setHtml(bufferText);
+                QString mdOutput = tempDoc.toMarkdown();
+                
+                editor->setFilePath(fileName);
+                writeFile(fileName, mdOutput);
+                codeEd->setContent(mdOutput, fileName);
+                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
+                updateWindowTitleAndStats();
+                return;
+            }
+        }
+
         editor->setFilePath(fileName);
         writeFile(fileName);
         tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
@@ -364,10 +399,17 @@ void MicroWriter::writeFile(const QString &fileName) {
     BaseEditor *editor = currentBaseEditor();
     if (!editor) return;
 
+    writeFile(fileName, editor->getContentForSave());
+}
+
+void MicroWriter::writeFile(const QString &fileName, const QString &customContent) {
+    BaseEditor *editor = currentBaseEditor();
+    if (!editor) return;
+
     QFile file(fileName);
     if (!file.open(QIODevice::WriteOnly)) return;
 
-    QString content = editor->getContentForSave();
+    QString content = customContent;
 
     content.replace(QRegularExpression("\\r\\n|\\r"), "\n");
     if (editor->eolFormat() == EolCrlf) content.replace('\n', "\r\n");
@@ -442,8 +484,23 @@ void MicroWriter::setLayoutMode(LayoutMode mode) {
 
     if (mode == CodeLayout) {
         if (curBase->supportsRichFormatting()) {
-            QString rawContent = curBase->getContentForSave();
+            EditorView *richEd = dynamic_cast<EditorView*>(curBase);
             QString fPath = curBase->filePath();
+            QString rawContent;
+
+            if (fPath.endsWith(".html", Qt::CaseInsensitive) || fPath.endsWith(".htm", Qt::CaseInsensitive)) {
+                rawContent = richEd ? richEd->toHtml() : curBase->getContentForSave();
+            } else if (fPath.endsWith(".md", Qt::CaseInsensitive)) {
+                if (richEd && !richEd->rawMarkdownSource().isEmpty() && !richEd->isModified()) {
+                    rawContent = richEd->rawMarkdownSource();
+                } else {
+                    rawContent = richEd ? richEd->toMarkdown() : curBase->getContentForSave();
+                }
+            } else {
+                // Default to HTML source view so rich formatting is preserved
+                rawContent = richEd ? richEd->toHtml() : curBase->getContentForSave();
+            }
+
             QString enc = curBase->encodingName();
             EolFormat eol = curBase->eolFormat();
             bool modified = curBase->isModified();

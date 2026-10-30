@@ -62,6 +62,7 @@ private:
 
     bool maybeSaveTab(int index);
     void writeFile(const QString &fileName);
+    void writeFile(const QString &fileName, const QString &customContent);
     void applyLayoutModeToEditor(EditorView *editor, LayoutMode mode);
     void updateStats();
     void updateWindowTitleAndStats();
