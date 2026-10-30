@@ -7,6 +7,7 @@
 #include <QTextBlockFormat>
 #include <QTextListFormat>
 #include <QTextTableFormat>
+#include <QTextLength>
 #include <QColorDialog>
 #include <QFileDialog>
 #include <QDateTime>
@@ -205,12 +206,24 @@ void insertTable(EditorView *editor, QWidget *parent) {
     TableDialog dlg(parent);
     if (dlg.exec() == QDialog::Accepted) {
         QTextCursor cursor = editor->textCursor();
+
+        QTextBlockFormat blkFmt = cursor.blockFormat();
+        blkFmt.setAlignment(dlg.alignment());
+        cursor.setBlockFormat(blkFmt);
+
         QTextTableFormat tableFormat;
-        tableFormat.setAlignment(Qt::AlignHCenter);
+        tableFormat.setAlignment(dlg.alignment());
         tableFormat.setCellPadding(5);
         tableFormat.setCellSpacing(0);
         tableFormat.setBorder(1);
         tableFormat.setBorderBrush(Qt::darkGray);
+
+        QList<QTextLength> constraints;
+        for (int i = 0; i < dlg.cols(); ++i) {
+            constraints.append(QTextLength(QTextLength::FixedLength, 120));
+        }
+        tableFormat.setColumnWidthConstraints(constraints);
+
         cursor.insertTable(dlg.rows(), dlg.cols(), tableFormat);
     }
 }

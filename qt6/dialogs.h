@@ -4,6 +4,7 @@
 #include <QDialog>
 #include <QString>
 #include <QList>
+#include <Qt>
 
 class QTextEdit;
 class EditorView;
@@ -23,9 +24,11 @@ public:
     explicit TableDialog(QWidget *parent = nullptr);
     int rows() const;
     int cols() const;
+    Qt::Alignment alignment() const;
 private:
     QSpinBox *rowSpin;
     QSpinBox *colSpin;
+    QComboBox *alignCombo;
 };
 
 class DateTimeDialog : public QDialog {
@@ -103,6 +106,32 @@ class HtmlHelpDialog : public QDialog {
     Q_OBJECT
 public:
     explicit HtmlHelpDialog(BaseEditor *ed, QWidget *parent = nullptr);
+
+private slots:
+    void applySelected();
+
+private:
+    BaseEditor *editor;
+    QTableWidget *tableWidget;
+};
+
+class SedHelpDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit SedHelpDialog(BaseEditor *ed, QWidget *parent = nullptr);
+
+private slots:
+    void applySelected();
+
+private:
+    BaseEditor *editor;
+    QTableWidget *tableWidget;
+};
+
+class BashHelpDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit BashHelpDialog(BaseEditor *ed, QWidget *parent = nullptr);
 
 private slots:
     void applySelected();

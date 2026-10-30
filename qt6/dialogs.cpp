@@ -23,7 +23,7 @@
 // TableDialog
 TableDialog::TableDialog(QWidget *parent) : QDialog(parent) {
     setWindowTitle("Insert Table");
-    resize(250, 140);
+    resize(280, 180);
 
     QVBoxLayout *layout = new QVBoxLayout(this);
     layout->addWidget(new QLabel("Rows:", this));
@@ -38,6 +38,14 @@ TableDialog::TableDialog(QWidget *parent) : QDialog(parent) {
     colSpin->setValue(3);
     layout->addWidget(colSpin);
 
+    layout->addWidget(new QLabel("Table Alignment:", this));
+    alignCombo = new QComboBox(this);
+    alignCombo->addItem("Left", static_cast<int>(Qt::AlignLeft));
+    alignCombo->addItem("Center", static_cast<int>(Qt::AlignHCenter));
+    alignCombo->addItem("Right", static_cast<int>(Qt::AlignRight));
+    alignCombo->setCurrentIndex(0); // Default to Left so tables hug the left margin like Markdown
+    layout->addWidget(alignCombo);
+
     QPushButton *okBtn = new QPushButton("Insert", this);
     connect(okBtn, &QPushButton::clicked, this, &QDialog::accept);
     layout->addWidget(okBtn);
@@ -45,6 +53,9 @@ TableDialog::TableDialog(QWidget *parent) : QDialog(parent) {
 
 int TableDialog::rows() const { return rowSpin->value(); }
 int TableDialog::cols() const { return colSpin->value(); }
+Qt::Alignment TableDialog::alignment() const {
+    return static_cast<Qt::Alignment>(alignCombo->currentData().toInt());
+}
 
 // DateTimeDialog
 DateTimeDialog::DateTimeDialog(QWidget *parent) : QDialog(parent) {
@@ -415,6 +426,132 @@ void HtmlHelpDialog::applySelected() {
     QString tag = tableWidget->item(row, 1)->text();
     QTextCursor c = editor->textCursor();
     c.insertText(tag);
+    editor->setTextCursor(c);
+    accept();
+}
+
+// SedHelpDialog
+SedHelpDialog::SedHelpDialog(BaseEditor *ed, QWidget *parent) : QDialog(parent), editor(ed) {
+    setWindowTitle("Sed & Unix Utilities Cheat Sheet");
+    resize(650, 400);
+
+    QVBoxLayout *layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel("Double-click a command or select and click 'Insert Command' to insert it into the editor:", this));
+
+    tableWidget = new QTableWidget(this);
+    tableWidget->setColumnCount(2);
+    tableWidget->setHorizontalHeaderLabels({"Description", "Command"});
+    tableWidget->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    tableWidget->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    struct SedSnippet { QString desc; QString cmd; };
+    QList<SedSnippet> snippets = {
+        {"Replace first occurrence per line", "sed 's/foo/bar/' file.txt"},
+        {"Global search and replace", "sed 's/foo/bar/g' file.txt"},
+        {"In-place file replace", "sed -i 's/foo/bar/g' file.txt"},
+        {"Delete empty lines", "sed '/^$/d' file.txt"},
+        {"Delete lines matching pattern", "sed '/pattern/d' file.txt"},
+        {"Print specific line numbers (e.g. 5-10)", "sed -n '5,10p' file.txt"},
+        {"Print specific column (col 1)", "awk '{print $1}' file.txt"},
+        {"Sum values in column 1", "awk '{s+=$1} END {print s}' file.txt"},
+        {"Extract delimiter separated fields (CSV)", "cut -d',' -f1,3 file.csv"},
+        {"Recursive case-insensitive with line numbers", "grep -rnI 'search_term' ."},
+        {"Translate uppercase to lowercase", "cat file.txt | tr '[:upper:]' '[:lower:]'"},
+        {"Parallel command execution (4 jobs)", "cat files.txt | xargs -n 1 -P 4 command"}
+    };
+
+    tableWidget->setRowCount(snippets.size());
+    for (int i = 0; i < snippets.size(); ++i) {
+        tableWidget->setItem(i, 0, new QTableWidgetItem(snippets[i].desc));
+        tableWidget->setItem(i, 1, new QTableWidgetItem(snippets[i].cmd));
+    }
+    layout->addWidget(tableWidget);
+
+    QPushButton *insBtn = new QPushButton("Insert Command", this);
+    connect(insBtn, &QPushButton::clicked, this, &SedHelpDialog::applySelected);
+    connect(tableWidget, &QTableWidget::cellDoubleClicked, this, [this](int, int){ applySelected(); });
+    layout->addWidget(insBtn);
+}
+
+void SedHelpDialog::applySelected() {
+    int row = tableWidget->currentRow();
+    if (row < 0 || !editor) return;
+
+    QString cmd = tableWidget->item(row, 1)->text();
+    QTextCursor c = editor->textCursor();
+    c.insertText(cmd);
+    editor->setTextCursor(c);
+    accept();
+}
+
+// BashHelpDialog
+BashHelpDialog::BashHelpDialog(BaseEditor *ed, QWidget *parent) : QDialog(parent), editor(ed) {
+    setWindowTitle("Useful Bash Scripts");
+    resize(650, 400);
+
+    QVBoxLayout *layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel("Double-click a script or select and click 'Insert Script' to insert it into the editor:", this));
+
+    tableWidget = new QTableWidget(this);
+    tableWidget->setColumnCount(2);
+    tableWidget->setHorizontalHeaderLabels({"Title", "Preview"});
+    tableWidget->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
+    tableWidget->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    struct ScriptSnippet { QString title; QString code; };
+    QList<ScriptSnippet> scripts = {
+        {
+            "Strict Mode Boilerplate (set -euo pipefail)",
+            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n    echo \"Starting script...\"\n}\nmain \"$@\"\n"
+        },
+        {
+            "CLI Option & Argument Parser (getopts)",
+            "while getopts \":f:h\" opt; do\n    case ${opt} in\n        f ) FILE=\"$OPTARG\" ;;\n        h ) echo \"Usage: $0 [-f file]\"; exit 0 ;;\n        \\? ) echo \"Invalid Option: -$OPTARG\" 1>&2; exit 1 ;;\n    esac\ndone\n"
+        },
+        {
+            "Traverse Directory & Loop Over Files Safe",
+            "while IFS= read -r -d '' file; do\n    echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
+        },
+        {
+            "Temporary Directory with Auto-Cleanup Trap",
+            "TMP_DIR=$(mktemp -d)\ntrap 'rm -rf \"$TMP_DIR\"' EXIT INT TERM\necho \"Using temporary directory: $TMP_DIR\"\n"
+        },
+        {
+            "Check Command Existence / Prerequisite Guard",
+            "command -v jq >/dev/null 2>&1 || { echo \"Error: 'jq' is required but not installed.\" >&2; exit 1; }\n"
+        },
+        {
+            "Prompt User for Confirmation (y/N)",
+            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n    [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n    *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
+        }
+    };
+
+    tableWidget->setRowCount(scripts.size());
+    for (int i = 0; i < scripts.size(); ++i) {
+        tableWidget->setItem(i, 0, new QTableWidgetItem(scripts[i].title));
+        QString firstLine = scripts[i].code.split('\n').first();
+        tableWidget->setItem(i, 1, new QTableWidgetItem(firstLine + " ..."));
+        tableWidget->item(i, 0)->setData(Qt::UserRole, scripts[i].code);
+    }
+    layout->addWidget(tableWidget);
+
+    QPushButton *insBtn = new QPushButton("Insert Script", this);
+    connect(insBtn, &QPushButton::clicked, this, &BashHelpDialog::applySelected);
+    connect(tableWidget, &QTableWidget::cellDoubleClicked, this, [this](int, int){ applySelected(); });
+    layout->addWidget(insBtn);
+}
+
+void BashHelpDialog::applySelected() {
+    int row = tableWidget->currentRow();
+    if (row < 0 || !editor) return;
+
+    QString code = tableWidget->item(row, 0)->data(Qt::UserRole).toString();
+    QTextCursor c = editor->textCursor();
+    c.insertText(code);
     editor->setTextCursor(c);
     accept();
 }
