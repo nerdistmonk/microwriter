@@ -22,6 +22,24 @@ static const std::vector<std::string> g_tuiStrictCodeExts = {
     "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake"
 };
 
+static std::string formatInlineMarkdownToHtml(std::string text) {
+    text = std::regex_replace(text, std::regex(R"(`([^`]+)`)"), "<code>$1</code>");
+    text = std::regex_replace(text, std::regex(R"(\*\*([^*]+)\*\*)"), "<strong>$1</strong>");
+    text = std::regex_replace(text, std::regex(R"(__([^_]+)__)"), "<strong>$1</strong>");
+    text = std::regex_replace(text, std::regex(R"(\*([^*]+)\*)"), "<em>$1</em>");
+    text = std::regex_replace(text, std::regex(R"(_([^_]+)_)"), "<em>$1</em>");
+    return text;
+}
+
+static std::string formatInlineHtmlToMarkdown(std::string text) {
+    text = std::regex_replace(text, std::regex(R"(<code[^>]*>(.*?)</code>)"), "`$1`");
+    text = std::regex_replace(text, std::regex(R"(<(strong|b)[^>]*>(.*?)</\1>)"), "**$2**");
+    text = std::regex_replace(text, std::regex(R"(<(em|i)[^>]*>(.*?)</\1>)"), "*$2*");
+    text = std::regex_replace(text, std::regex(R"(<span[^>]*font-weight:\s*(700|bold)[^>]*>(.*?)</span>)"), "**$2**");
+    text = std::regex_replace(text, std::regex(R"(<span[^>]*>(.*?)</span>)"), "$1");
+    return text;
+}
+
 class NcursesEditor {
 public:
     NcursesEditor() = default;
@@ -126,6 +144,324 @@ private:
         return std::find(g_tuiStrictCodeExts.begin(), g_tuiStrictCodeExts.end(), ext) != g_tuiStrictCodeExts.end();
     }
 
+    std::string serializeLinesToMarkdown(const std::vector<std::string> &lines) {
+        std::ostringstream out;
+        size_t i = 0;
+
+        while (i < lines.size()) {
+            std::string l = lines[i];
+
+            if (l.find("<table") != std::string::npos) {
+                std::string tableContent;
+                while (i < lines.size()) {
+                    tableContent += lines[i] + "\n";
+                    if (lines[i].find("</table>") != std::string::npos) break;
+                    ++i;
+                }
+
+                std::vector<std::vector<std::string>> rows;
+                std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)");
+                std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)");
+
+                auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
+                auto trEnd = std::sregex_iterator();
+                for (auto tri = trBegin; tri != trEnd; ++tri) {
+                    std::string rowHtml = (*tri)[1].str();
+                    std::vector<std::string> cells;
+                    auto cellBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), cellRegex);
+                    auto cellEnd = std::sregex_iterator();
+                    for (auto ci = cellBegin; ci != cellEnd; ++ci) {
+                        std::string cText = (*ci)[2].str();
+                        cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)"), "");
+                        cells.push_back(formatInlineHtmlToMarkdown(cText));
+                    }
+                    if (!cells.empty()) rows.push_back(cells);
+                }
+
+                if (!rows.empty()) {
+                    size_t maxCols = 0;
+                    for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
+
+                    out << "\n|";
+                    for (size_t c = 0; c < maxCols; ++c) {
+                        std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
+                        out << " " << val << " |";
+                    }
+                    out << "\n|";
+                    for (size_t c = 0; c < maxCols; ++c) {
+                        out << " --- |";
+                    }
+                    out << "\n";
+                    for (size_t r = 1; r < rows.size(); ++r) {
+                        out << "|";
+                        for (size_t c = 0; c < maxCols; ++c) {
+                            std::string val = (c < rows[r].size()) ? rows[r][c] : " ";
+                            out << " " << val << " |";
+                        }
+                        out << "\n";
+                    }
+                    out << "\n";
+                }
+                ++i;
+                continue;
+            }
+
+            std::regex hRegex(R"(<h([1-6])[^>]*>(.*?)</h\1>)");
+            std::smatch hMatch;
+            if (std::regex_search(l, hMatch, hRegex)) {
+                int level = std::stoi(hMatch[1].str());
+                std::string content = hMatch[2].str();
+                std::string prefix(level, '#');
+                out << prefix << " " << formatInlineHtmlToMarkdown(content) << "\n\n";
+                ++i;
+                continue;
+            }
+
+            std::regex liRegex(R"(<li[^>]*>(.*?)</li>)");
+            std::smatch liMatch;
+            if (std::regex_search(l, liMatch, liRegex)) {
+                std::string content = liMatch[1].str();
+                out << "- " << formatInlineHtmlToMarkdown(content) << "\n";
+                ++i;
+                continue;
+            }
+
+            if (l.find("<hr") != std::string::npos) {
+                out << "---\n\n";
+                ++i;
+                continue;
+            }
+
+            if (l.find("<blockquote") != std::string::npos) {
+                std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*>)"), "");
+                size_t first = q.find_first_not_of(" \t");
+                q = (first != std::string::npos) ? ("> " + q.substr(first)) : "> ";
+                out << formatInlineHtmlToMarkdown(q) << "\n\n";
+                ++i;
+                continue;
+            }
+
+            std::regex pRegex(R"(<p[^>]*>(.*?)</p>)");
+            std::smatch pMatch;
+            if (std::regex_search(l, pMatch, pRegex)) {
+                std::string content = pMatch[1].str();
+                if (content == "<br />" || content == "<br>" || content == "<br/>" || content.empty()) {
+                    out << "\n";
+                } else {
+                    out << formatInlineHtmlToMarkdown(content) << "\n\n";
+                }
+                ++i;
+                continue;
+            }
+
+            if (l.find("<!DOCTYPE") != std::string::npos || l.find("<html") != std::string::npos ||
+                l.find("</html>") != std::string::npos || l.find("<head") != std::string::npos ||
+                l.find("</head>") != std::string::npos || l.find("<body") != std::string::npos ||
+                l.find("</body>") != std::string::npos || l.find("<style") != std::string::npos ||
+                l.find("</style>") != std::string::npos || l.find("<ul>") != std::string::npos ||
+                l.find("</ul>") != std::string::npos || l.find("<ol>") != std::string::npos ||
+                l.find("</ol>") != std::string::npos) {
+                ++i;
+                continue;
+            }
+
+            if (l.rfind("• ", 0) == 0) {
+                l = "- " + l.substr(std::string("• ").length());
+            }
+
+            out << formatInlineHtmlToMarkdown(l) << "\n";
+            ++i;
+        }
+
+        std::string res = out.str();
+        res = std::regex_replace(res, std::regex(R"(\n{3,})"), "\n\n");
+        return res;
+    }
+
+    std::string serializeLinesToHtml(const std::vector<std::string> &lines) {
+        bool hasHtmlRoot = false;
+        for (const auto &l : lines) {
+            if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos) {
+                hasHtmlRoot = true;
+                break;
+            }
+        }
+        if (hasHtmlRoot) {
+            std::ostringstream out;
+            for (size_t i = 0; i < lines.size(); ++i) {
+                out << lines[i];
+                if (i + 1 < lines.size()) out << "\n";
+            }
+            return out.str();
+        }
+
+        std::ostringstream out;
+        out << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" />\n";
+        out << "<style type=\"text/css\">\n";
+        out << "p { margin: 0px; white-space: pre-wrap; }\n";
+        out << "ul, ol { margin: 0px 0px 0px 24px; padding: 0px; }\n";
+        out << "table { border-collapse: collapse; margin: 10px 0; }\n";
+        out << "th, td { border: 1px solid #777; padding: 4px 8px; }\n";
+        out << "</style></head><body>\n";
+
+        bool inUl = false;
+        bool inOl = false;
+        size_t i = 0;
+
+        while (i < lines.size()) {
+            std::string l = lines[i];
+
+            if (l.rfind("|", 0) == 0 && l.length() > 1 && l.back() == '|') {
+                if (inUl) { out << "</ul>\n"; inUl = false; }
+                if (inOl) { out << "</ol>\n"; inOl = false; }
+
+                std::vector<std::vector<std::string>> tableRows;
+                while (i < lines.size() && lines[i].rfind("|", 0) == 0 && lines[i].length() > 1 && lines[i].back() == '|') {
+                    std::string rowLine = lines[i];
+                    bool isSep = true;
+                    for (char c : rowLine) {
+                        if (c != '|' && c != '-' && c != ':' && c != ' ' && c != '\t') {
+                            isSep = false;
+                            break;
+                        }
+                    }
+                    if (!isSep) {
+                        std::vector<std::string> cells;
+                        size_t pos = 1;
+                        while (pos < rowLine.length()) {
+                            size_t nextPipe = rowLine.find('|', pos);
+                            if (nextPipe == std::string::npos) break;
+                            std::string cell = rowLine.substr(pos, nextPipe - pos);
+                            size_t start = cell.find_first_not_of(" \t");
+                            size_t end = cell.find_last_not_of(" \t");
+                            cells.push_back((start != std::string::npos) ? cell.substr(start, end - start + 1) : "");
+                            pos = nextPipe + 1;
+                        }
+                        if (!cells.empty()) tableRows.push_back(cells);
+                    }
+                    ++i;
+                }
+
+                if (!tableRows.empty()) {
+                    out << "<table>\n";
+                    for (size_t r = 0; r < tableRows.size(); ++r) {
+                        out << "<tr>";
+                        for (const auto &cell : tableRows[r]) {
+                            std::string tag = (r == 0) ? "th" : "td";
+                            out << "<" << tag << ">" << formatInlineMarkdownToHtml(cell) << "</" << tag << ">";
+                        }
+                        out << "</tr>\n";
+                    }
+                    out << "</table>\n";
+                }
+                continue;
+            }
+
+            std::string trimmed = l;
+            size_t tStart = trimmed.find_first_not_of(" \t");
+            size_t tEnd = trimmed.find_last_not_of(" \t");
+            trimmed = (tStart != std::string::npos) ? trimmed.substr(tStart, tEnd - tStart + 1) : "";
+
+            if (trimmed == "---" || trimmed == "***" || trimmed == "___" || trimmed == "<hr>" || trimmed == "<hr />" || trimmed == "<hr/>") {
+                if (inUl) { out << "</ul>\n"; inUl = false; }
+                if (inOl) { out << "</ol>\n"; inOl = false; }
+                out << "<hr />\n";
+                ++i;
+                continue;
+            }
+
+            if (trimmed.rfind("#", 0) == 0) {
+                size_t hCount = 0;
+                while (hCount < trimmed.length() && trimmed[hCount] == '#') hCount++;
+                if (hCount <= 6 && hCount < trimmed.length() && (trimmed[hCount] == ' ' || trimmed[hCount] == '\t')) {
+                    if (inUl) { out << "</ul>\n"; inUl = false; }
+                    if (inOl) { out << "</ol>\n"; inOl = false; }
+                    size_t cStart = trimmed.find_first_not_of(" \t", hCount);
+                    std::string hText = (cStart != std::string::npos) ? trimmed.substr(cStart) : "";
+                    out << "<h" << hCount << ">" << formatInlineMarkdownToHtml(hText) << "</h" << hCount << ">\n";
+                    ++i;
+                    continue;
+                }
+            }
+
+            if (trimmed.rfind(">", 0) == 0) {
+                if (inUl) { out << "</ul>\n"; inUl = false; }
+                if (inOl) { out << "</ol>\n"; inOl = false; }
+                size_t bStart = trimmed.find_first_not_of(" \t", 1);
+                std::string qText = (bStart != std::string::npos) ? trimmed.substr(bStart) : "";
+                out << "<blockquote>" << formatInlineMarkdownToHtml(qText) << "</blockquote>\n";
+                ++i;
+                continue;
+            }
+
+            bool isBullet = (trimmed.rfind("• ", 0) == 0 || trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0);
+            std::string bulletText = "";
+            if (trimmed.rfind("• ", 0) == 0) bulletText = trimmed.substr(std::string("• ").length());
+            else if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0) bulletText = trimmed.substr(2);
+
+            size_t dotPos = trimmed.find(". ");
+            bool isNumbered = false;
+            if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
+                bool allDigits = true;
+                for (size_t di = 0; di < dotPos; ++di) {
+                    if (!std::isdigit(static_cast<unsigned char>(trimmed[di]))) {
+                        allDigits = false;
+                        break;
+                    }
+                }
+                if (allDigits) isNumbered = true;
+            }
+
+            if (isBullet) {
+                if (inOl) { out << "</ol>\n"; inOl = false; }
+                if (!inUl) { out << "<ul>\n"; inUl = true; }
+                out << "<li>" << formatInlineMarkdownToHtml(bulletText) << "</li>\n";
+            } else if (isNumbered) {
+                if (inUl) { out << "</ul>\n"; inUl = false; }
+                if (!inOl) { out << "<ol>\n"; inOl = true; }
+                out << "<li>" << formatInlineMarkdownToHtml(trimmed.substr(dotPos + 2)) << "</li>\n";
+            } else {
+                if (inUl) { out << "</ul>\n"; inUl = false; }
+                if (inOl) { out << "</ol>\n"; inOl = false; }
+
+                if (trimmed.empty()) {
+                    out << "<p><br /></p>\n";
+                } else if (trimmed.find("<table") != std::string::npos || trimmed.find("<tr") != std::string::npos || trimmed.find("<td") != std::string::npos) {
+                    out << l << "\n";
+                } else {
+                    out << "<p>" << formatInlineMarkdownToHtml(l) << "</p>\n";
+                }
+            }
+            ++i;
+        }
+
+        if (inUl) out << "</ul>\n";
+        if (inOl) out << "</ol>\n";
+
+        out << "</body></html>\n";
+        return out.str();
+    }
+
+    std::string serializeLinesToPlainText(const std::vector<std::string> &lines) {
+        std::ostringstream out;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            std::string l = lines[i];
+            if (l.rfind("• ", 0) == 0) {
+                l = "- " + l.substr(std::string("• ").length());
+            } else if (l.find("<hr") != std::string::npos) {
+                l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "----------------------------------------");
+            } else if (l.find("<blockquote") != std::string::npos) {
+                l = std::regex_replace(l, std::regex("</?blockquote>"), "");
+                size_t first = l.find_first_not_of(" \t");
+                l = (first != std::string::npos) ? ("> " + l.substr(first)) : "> ";
+            }
+            l = std::regex_replace(l, std::regex("<[^>]*>"), "");
+            out << l;
+            if (i + 1 < lines.size()) out << "\n";
+        }
+        return out.str();
+    }
+
     std::string serializeDocToRaw(const EditorDocument &d) {
         std::string ext = "";
         size_t dot = d.filePath.find_last_of('.');
@@ -134,165 +470,20 @@ private:
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
 
-        std::ostringstream out;
         if (ext == "md") {
-            for (size_t i = 0; i < d.lines.size(); ++i) {
-                std::string l = d.lines[i];
-
-                if (l.rfind("• ", 0) == 0) {
-                    l = "- " + l.substr(std::string("• ").length());
-                } else if (l.find("<hr") != std::string::npos) {
-                    l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "---");
-                } else if (l.find("<blockquote") != std::string::npos) {
-                    l = std::regex_replace(l, std::regex("</?blockquote>"), "");
-                    size_t first = l.find_first_not_of(" \t");
-                    l = (first != std::string::npos) ? ("> " + l.substr(first)) : "> ";
-                }
-
-                if (l.find("<table") != std::string::npos) {
-                    std::string tableContent;
-                    while (i < d.lines.size()) {
-                        tableContent += d.lines[i] + "\n";
-                        if (d.lines[i].find("</table>") != std::string::npos) break;
-                        ++i;
-                    }
-
-                    std::vector<std::vector<std::string>> rows;
-                    std::regex trRegex("<tr[^>]*>(.*?)</tr>");
-                    std::regex tdRegex("<td[^>]*>(.*?)</td>");
-
-                    auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
-                    auto trEnd = std::sregex_iterator();
-                    for (auto tri = trBegin; tri != trEnd; ++tri) {
-                        std::string rowHtml = (*tri)[1].str();
-                        std::vector<std::string> cells;
-                        auto tdBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), tdRegex);
-                        auto tdEnd = std::sregex_iterator();
-                        for (auto tdi = tdBegin; tdi != tdEnd; ++tdi) {
-                            cells.push_back((*tdi)[1].str());
-                        }
-                        if (!cells.empty()) rows.push_back(cells);
-                    }
-
-                    if (!rows.empty()) {
-                        size_t maxCols = 0;
-                        for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
-
-                        out << "\n|";
-                        for (size_t c = 0; c < maxCols; ++c) {
-                            std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
-                            out << " " << val << " |";
-                        }
-                        out << "\n|";
-                        for (size_t c = 0; c < maxCols; ++c) {
-                            out << " --- |";
-                        }
-                        out << "\n";
-                        for (size_t r = 1; r < rows.size(); ++r) {
-                            out << "|";
-                            for (size_t c = 0; c < maxCols; ++c) {
-                                std::string val = (c < rows[r].size()) ? rows[r][c] : " ";
-                                out << " " << val << " |";
-                            }
-                            out << "\n";
-                        }
-                        out << "\n";
-                        continue;
-                    }
-                }
-
-                out << l;
-                if (i + 1 < d.lines.size()) out << "\n";
-            }
-            return out.str();
+            return serializeLinesToMarkdown(d.lines);
         }
 
         if (ext == "txt") {
-            for (size_t i = 0; i < d.lines.size(); ++i) {
-                std::string l = d.lines[i];
-                if (l.rfind("• ", 0) == 0) {
-                    l = "- " + l.substr(std::string("• ").length());
-                } else if (l.find("<hr") != std::string::npos) {
-                    l = std::regex_replace(l, std::regex("<hr\\s*/?>"), "----------------------------------------");
-                } else if (l.find("<blockquote") != std::string::npos) {
-                    l = std::regex_replace(l, std::regex("</?blockquote>"), "");
-                    size_t first = l.find_first_not_of(" \t");
-                    l = (first != std::string::npos) ? ("> " + l.substr(first)) : "> ";
-                }
-                l = std::regex_replace(l, std::regex("<[^>]*>"), "");
-                out << l;
-                if (i + 1 < d.lines.size()) out << "\n";
-            }
-            return out.str();
+            return serializeLinesToPlainText(d.lines);
         }
 
         bool isHtml = (ext == "html" || ext == "htm" || d.filePath.empty());
         if (isHtml) {
-            bool hasHtmlRoot = false;
-            for (const auto &l : d.lines) {
-                if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos) {
-                    hasHtmlRoot = true;
-                    break;
-                }
-            }
-
-            if (!hasHtmlRoot) {
-                out << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" />\n";
-                out << "<style type=\"text/css\">\n";
-                out << "p { margin: 0px; white-space: pre-wrap; }\n";
-                out << "ul, ol { margin: 0px 0px 0px 24px; padding: 0px; }\n";
-                out << "</style></head><body>\n";
-
-                bool inUl = false;
-                bool inOl = false;
-
-                for (const auto &l : d.lines) {
-                    bool isBullet = (l.rfind("• ", 0) == 0);
-
-                    size_t dotPos = l.find(". ");
-                    bool isNumbered = false;
-                    if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
-                        bool allDigits = true;
-                        for (size_t di = 0; di < dotPos; ++di) {
-                            if (!std::isdigit(static_cast<unsigned char>(l[di]))) {
-                                allDigits = false;
-                                break;
-                            }
-                        }
-                        if (allDigits) isNumbered = true;
-                    }
-
-                    if (isBullet) {
-                        if (inOl) { out << "</ol>\n"; inOl = false; }
-                        if (!inUl) { out << "<ul>\n"; inUl = true; }
-                        out << "<li>" << l.substr(std::string("• ").length()) << "</li>\n";
-                    } else if (isNumbered) {
-                        if (inUl) { out << "</ul>\n"; inUl = false; }
-                        if (!inOl) { out << "<ol>\n"; inOl = true; }
-                        out << "<li>" << l.substr(dotPos + 2) << "</li>\n";
-                    } else {
-                        if (inUl) { out << "</ul>\n"; inUl = false; }
-                        if (inOl) { out << "</ol>\n"; inOl = false; }
-
-                        if (l.empty()) {
-                            out << "<p><br /></p>\n";
-                        } else if (l.find("<table") != std::string::npos || l.find("<hr") != std::string::npos ||
-                                   l.find("<tr") != std::string::npos || l.find("<td") != std::string::npos) {
-                            out << l << "\n";
-                        } else {
-                            out << "<p>" << l << "</p>\n";
-                        }
-                    }
-                }
-
-                if (inUl) out << "</ul>\n";
-                if (inOl) out << "</ol>\n";
-
-                out << "</body></html>\n";
-                return out.str();
-            }
+            return serializeLinesToHtml(d.lines);
         }
 
+        std::ostringstream out;
         for (size_t i = 0; i < d.lines.size(); ++i) {
             out << d.lines[i];
             if (i + 1 < d.lines.size()) out << "\n";
@@ -542,7 +733,7 @@ private:
         size_t lastSlash = curPath.find_last_of("/\\");
         doc().title = (lastSlash == std::string::npos) ? curPath : curPath.substr(lastSlash + 1);
 
-        writeDocumentToFile(curPath);
+        writeDocumentToFile(curPath, fmtType);
     }
 
     void saveCurrentFile() {
@@ -550,10 +741,10 @@ private:
             saveAsFile();
             return;
         }
-        writeDocumentToFile(doc().filePath);
+        writeDocumentToFile(doc().filePath, -1);
     }
 
-    void writeDocumentToFile(const std::string &path) {
+    void writeDocumentToFile(const std::string &path, int targetFormat = -1) {
         std::ofstream out(path, std::ios::binary);
         if (!out.is_open()) return;
 
@@ -564,94 +755,61 @@ private:
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
 
-        if (doc().mode == TuiMode::RichText && ext == "md") {
-            std::string mdContent = serializeDocToRaw(doc());
-            out << mdContent;
-            doc().modified = false;
-            triggerSaveFlash();
-            return;
-        }
+        bool savingAsHtml = (ext == "html" || ext == "htm" || targetFormat == 0);
+        bool savingAsMd = (ext == "md" || targetFormat == 1);
+        bool savingAsTxt = (ext == "txt" || targetFormat == 2);
 
-        if (doc().mode == TuiMode::RichText && ext == "txt") {
-            std::string txtContent = serializeDocToRaw(doc());
-            out << txtContent;
-            doc().modified = false;
-            triggerSaveFlash();
-            return;
-        }
-
-        if (doc().mode == TuiMode::RichText && (ext == "html" || ext == "htm")) {
-            bool hasHtmlRoot = false;
-            for (const auto &l : doc().lines) {
-                if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos) {
-                    hasHtmlRoot = true;
-                    break;
-                }
-            }
-
-            if (!hasHtmlRoot) {
-                out << "<!DOCTYPE html>\n<html><head><meta charset=\"utf-8\" />\n";
-                out << "<style type=\"text/css\">\n";
-                out << "p { margin: 0px; white-space: pre-wrap; }\n";
-                out << "ul, ol { margin: 0px 0px 0px 24px; padding: 0px; }\n";
-                out << "</style></head><body>\n";
-
-                bool inUl = false;
-                bool inOl = false;
-
-                for (const auto &l : doc().lines) {
-                    bool isBullet = (l.rfind("• ", 0) == 0);
-
-                    size_t dotPos = l.find(". ");
-                    bool isNumbered = false;
-                    if (dotPos != std::string::npos && dotPos > 0 && dotPos < 6) {
-                        bool allDigits = true;
-                        for (size_t di = 0; di < dotPos; ++di) {
-                            if (!std::isdigit(static_cast<unsigned char>(l[di]))) {
-                                allDigits = false;
-                                break;
-                            }
-                        }
-                        if (allDigits) isNumbered = true;
-                    }
-
-                    if (isBullet) {
-                        if (inOl) { out << "</ol>\n"; inOl = false; }
-                        if (!inUl) { out << "<ul>\n"; inUl = true; }
-                        out << "<li>" << l.substr(std::string("• ").length()) << "</li>\n";
-                    } else if (isNumbered) {
-                        if (inUl) { out << "</ul>\n"; inUl = false; }
-                        if (!inOl) { out << "<ol>\n"; inOl = true; }
-                        out << "<li>" << l.substr(dotPos + 2) << "</li>\n";
-                    } else {
-                        if (inUl) { out << "</ul>\n"; inUl = false; }
-                        if (inOl) { out << "</ol>\n"; inOl = false; }
-
-                        if (l.empty()) {
-                            out << "<p><br /></p>\n";
-                        } else if (l.find("<table") != std::string::npos || l.find("<hr") != std::string::npos ||
-                                   l.find("<tr") != std::string::npos || l.find("<td") != std::string::npos) {
-                            out << l << "\n";
-                        } else {
-                            out << "<p>" << l << "</p>\n";
-                        }
-                    }
-                }
-
-                if (inUl) out << "</ul>\n";
-                if (inOl) out << "</ol>\n";
-
-                out << "</body></html>\n";
-                doc().modified = false;
-                triggerSaveFlash();
-                return;
+        bool bufferHasHtml = false;
+        for (const auto &l : doc().lines) {
+            if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos ||
+                l.find("<p") != std::string::npos || l.find("<div") != std::string::npos ||
+                l.find("<table") != std::string::npos) {
+                bufferHasHtml = true;
+                break;
             }
         }
 
-        for (size_t i = 0; i < doc().lines.size(); ++i) {
-            out << doc().lines[i];
-            if (i + 1 < doc().lines.size()) out << (doc().eolFormat == "CRLF" ? "\r\n" : (doc().eolFormat == "CR" ? "\r" : "\n"));
+        std::string finalOutput;
+
+        if (savingAsHtml) {
+            if (bufferHasHtml) {
+                std::ostringstream ss;
+                for (size_t i = 0; i < doc().lines.size(); ++i) {
+                    ss << doc().lines[i];
+                    if (i + 1 < doc().lines.size()) ss << "\n";
+                }
+                finalOutput = ss.str();
+            } else {
+                finalOutput = serializeLinesToHtml(doc().lines);
+            }
+        } else if (savingAsMd) {
+            if (bufferHasHtml) {
+                finalOutput = serializeLinesToMarkdown(doc().lines);
+            } else {
+                std::ostringstream ss;
+                for (size_t i = 0; i < doc().lines.size(); ++i) {
+                    ss << doc().lines[i];
+                    if (i + 1 < doc().lines.size()) ss << "\n";
+                }
+                finalOutput = ss.str();
+            }
+        } else if (savingAsTxt) {
+            finalOutput = serializeLinesToPlainText(doc().lines);
+        } else {
+            std::ostringstream ss;
+            for (size_t i = 0; i < doc().lines.size(); ++i) {
+                ss << doc().lines[i];
+                if (i + 1 < doc().lines.size()) ss << "\n";
+            }
+            finalOutput = ss.str();
         }
+
+        std::string eolStr = (doc().eolFormat == "CRLF") ? "\r\n" : ((doc().eolFormat == "CR") ? "\r" : "\n");
+        if (eolStr != "\n") {
+            finalOutput = std::regex_replace(finalOutput, std::regex("\r\n|\r|\n"), eolStr);
+        }
+
+        out << finalOutput;
         doc().modified = false;
         triggerSaveFlash();
     }
@@ -841,13 +999,13 @@ private:
     }
 
     void handleMouseEvent(const MEVENT &event) {
-        #if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
+#if defined(NCURSES_MOUSE_VERSION) && (NCURSES_MOUSE_VERSION > 1)
         const mmask_t wheelUp = BUTTON4_PRESSED;
         const mmask_t wheelDown = BUTTON5_PRESSED;
-        #else
+#else
         const mmask_t wheelUp = 0x10000;
         const mmask_t wheelDown = 0x200000;
-        #endif
+#endif
 
         if (event.bstate & wheelUp) {
             int scrollStep = 3;
