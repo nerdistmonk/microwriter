@@ -22,6 +22,12 @@ static const std::vector<std::string> g_tuiStrictCodeExts = {
     "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake"
 };
 
+static std::string stripHtmlHeadersAndStyle(std::string text) {
+    text = std::regex_replace(text, std::regex(R"(<style[^>]*>[\s\S]*?</style>)", std::regex::icase), "");
+    text = std::regex_replace(text, std::regex(R"(<head[^>]*>[\s\S]*?</head>)", std::regex::icase), "");
+    return text;
+}
+
 static std::string formatInlineMarkdownToHtml(std::string text) {
     text = std::regex_replace(text, std::regex(R"(`([^`]+)`)"), "<code>$1</code>");
     text = std::regex_replace(text, std::regex(R"(\*\*([^*]+)\*\*)"), "<strong>$1</strong>");
@@ -147,9 +153,26 @@ private:
     std::string serializeLinesToMarkdown(const std::vector<std::string> &lines) {
         std::ostringstream out;
         size_t i = 0;
+        bool inStyle = false;
 
         while (i < lines.size()) {
             std::string l = lines[i];
+
+            if (l.find("<style") != std::string::npos) {
+                inStyle = true;
+                if (l.find("</style>") != std::string::npos) {
+                    inStyle = false;
+                }
+                ++i;
+                continue;
+            }
+            if (inStyle) {
+                if (l.find("</style>") != std::string::npos) {
+                    inStyle = false;
+                }
+                ++i;
+                continue;
+            }
 
             if (l.find("<table") != std::string::npos) {
                 std::string tableContent;
@@ -160,8 +183,8 @@ private:
                 }
 
                 std::vector<std::vector<std::string>> rows;
-                std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)");
-                std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)");
+                std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)", std::regex::icase);
+                std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)", std::regex::icase);
 
                 auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
                 auto trEnd = std::sregex_iterator();
@@ -172,7 +195,7 @@ private:
                     auto cellEnd = std::sregex_iterator();
                     for (auto ci = cellBegin; ci != cellEnd; ++ci) {
                         std::string cText = (*ci)[2].str();
-                        cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)"), "");
+                        cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)", std::regex::icase), "");
                         cells.push_back(formatInlineHtmlToMarkdown(cText));
                     }
                     if (!cells.empty()) rows.push_back(cells);
@@ -206,7 +229,7 @@ private:
                 continue;
             }
 
-            std::regex hRegex(R"(<h([1-6])[^>]*>(.*?)</h\1>)");
+            std::regex hRegex(R"(<h([1-6])[^>]*>(.*?)</h\1>)", std::regex::icase);
             std::smatch hMatch;
             if (std::regex_search(l, hMatch, hRegex)) {
                 int level = std::stoi(hMatch[1].str());
@@ -217,7 +240,7 @@ private:
                 continue;
             }
 
-            std::regex liRegex(R"(<li[^>]*>(.*?)</li>)");
+            std::regex liRegex(R"(<li[^>]*>(.*?)</li>)", std::regex::icase);
             std::smatch liMatch;
             if (std::regex_search(l, liMatch, liRegex)) {
                 std::string content = liMatch[1].str();
@@ -233,7 +256,7 @@ private:
             }
 
             if (l.find("<blockquote") != std::string::npos) {
-                std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*>)"), "");
+                std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*>)", std::regex::icase), "");
                 size_t first = q.find_first_not_of(" \t");
                 q = (first != std::string::npos) ? ("> " + q.substr(first)) : "> ";
                 out << formatInlineHtmlToMarkdown(q) << "\n\n";
@@ -241,7 +264,7 @@ private:
                 continue;
             }
 
-            std::regex pRegex(R"(<p[^>]*>(.*?)</p>)");
+            std::regex pRegex(R"(<p[^>]*>(.*?)</p>)", std::regex::icase);
             std::smatch pMatch;
             if (std::regex_search(l, pMatch, pRegex)) {
                 std::string content = pMatch[1].str();
@@ -257,9 +280,8 @@ private:
             if (l.find("<!DOCTYPE") != std::string::npos || l.find("<html") != std::string::npos ||
                 l.find("</html>") != std::string::npos || l.find("<head") != std::string::npos ||
                 l.find("</head>") != std::string::npos || l.find("<body") != std::string::npos ||
-                l.find("</body>") != std::string::npos || l.find("<style") != std::string::npos ||
-                l.find("</style>") != std::string::npos || l.find("<ul>") != std::string::npos ||
-                l.find("</ul>") != std::string::npos || l.find("<ol>") != std::string::npos ||
+                l.find("</body>") != std::string::npos || l.find("<ul") != std::string::npos ||
+                l.find("</ul>") != std::string::npos || l.find("<ol") != std::string::npos ||
                 l.find("</ol>") != std::string::npos) {
                 ++i;
                 continue;
@@ -426,7 +448,10 @@ private:
 
                 if (trimmed.empty()) {
                     out << "<p><br /></p>\n";
-                } else if (trimmed.find("<table") != std::string::npos || trimmed.find("<tr") != std::string::npos || trimmed.find("<td") != std::string::npos) {
+                } else if (trimmed.find("<table") != std::string::npos || trimmed.find("<tr") != std::string::npos || trimmed.find("<td") != std::string::npos ||
+                           trimmed.find("<h") != std::string::npos || trimmed.find("<hr") != std::string::npos || trimmed.find("<blockquote") != std::string::npos) {
+                    out << l << "\n";
+                } else if (trimmed.rfind("<p", 0) == 0 && trimmed.find("</p>") != std::string::npos) {
                     out << l << "\n";
                 } else {
                     out << "<p>" << formatInlineMarkdownToHtml(l) << "</p>\n";
@@ -491,7 +516,7 @@ private:
         return out.str();
     }
 
-    void deserializeRawToRich(EditorDocument &d, const std::string &rawContent) {
+    void deserializeRawToRich(EditorDocument &d, std::string rawContent) {
         std::string ext = "";
         size_t dot = d.filePath.find_last_of('.');
         if (dot != std::string::npos) {
@@ -502,7 +527,20 @@ private:
         d.lines.clear();
 
         bool isHtml = (ext == "html" || ext == "htm" || d.filePath.empty());
-        if (isHtml && (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos)) {
+        if (!isHtml && (rawContent.find("<html") != std::string::npos || rawContent.find("<!DOCTYPE") != std::string::npos)) {
+            isHtml = true;
+        }
+
+        if (isHtml) {
+            rawContent = stripHtmlHeadersAndStyle(rawContent);
+        }
+
+        if (isHtml && (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos ||
+                       rawContent.find("<h1") != std::string::npos || rawContent.find("<h2") != std::string::npos ||
+                       rawContent.find("<h3") != std::string::npos || rawContent.find("<h4") != std::string::npos ||
+                       rawContent.find("<h5") != std::string::npos || rawContent.find("<h6") != std::string::npos ||
+                       rawContent.find("<table") != std::string::npos || rawContent.find("<hr") != std::string::npos ||
+                       rawContent.find("<blockquote") != std::string::npos)) {
             size_t pos = 0;
             int currentOlNum = 1;
             bool insideOl = false;
@@ -511,6 +549,24 @@ private:
                 size_t nextTag = rawContent.find('<', pos);
                 if (nextTag == std::string::npos) break;
 
+                // Handle <style>...</style> block skipping
+                if (rawContent.compare(nextTag, 6, "<style", 6) == 0) {
+                    size_t endStyle = rawContent.find("</style>", nextTag);
+                    if (endStyle != std::string::npos) {
+                        pos = endStyle + 8;
+                        continue;
+                    }
+                }
+                // Handle <head>...</head> block skipping
+                if (rawContent.compare(nextTag, 5, "<head", 5) == 0) {
+                    size_t endHead = rawContent.find("</head>", nextTag);
+                    if (endHead != std::string::npos) {
+                        pos = endHead + 7;
+                        continue;
+                    }
+                }
+
+                // Handle <ol>
                 if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
                     insideOl = true;
                     currentOlNum = 1;
@@ -522,6 +578,7 @@ private:
                     pos = nextTag + 5;
                     continue;
                 }
+                // Handle <ul>
                 if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
                     insideOl = false;
                     pos = rawContent.find('>', nextTag) + 1;
@@ -532,6 +589,108 @@ private:
                     continue;
                 }
 
+                // Handle Headings: <h1> through <h6>
+                if (nextTag + 3 < rawContent.length() && (rawContent[nextTag + 1] == 'h' || rawContent[nextTag + 1] == 'H') &&
+                    (rawContent[nextTag + 2] >= '1' && rawContent[nextTag + 2] <= '6') &&
+                    (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
+                    char hDigit = rawContent[nextTag + 2];
+                    size_t closeTag = rawContent.find('>', nextTag);
+                    if (closeTag == std::string::npos) break;
+                    std::string endTag = std::string("</h") + hDigit + ">";
+                    size_t endH = rawContent.find(endTag, closeTag);
+                    if (endH == std::string::npos) {
+                        endTag = std::string("</H") + hDigit + ">";
+                        endH = rawContent.find(endTag, closeTag);
+                    }
+                    if (endH != std::string::npos) {
+                        std::string hContent = rawContent.substr(closeTag + 1, endH - closeTag - 1);
+                        int level = hDigit - '0';
+                        d.lines.push_back(std::string(level, '#') + " " + hContent);
+                        pos = endH + endTag.length();
+                        continue;
+                    }
+                }
+
+                // Handle <hr> / <hr />
+                if (rawContent.compare(nextTag, 3, "<hr", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ' || rawContent[nextTag + 3] == '/')) {
+                    size_t closeTag = rawContent.find('>', nextTag);
+                    if (closeTag != std::string::npos) {
+                        d.lines.push_back("<hr>");
+                        pos = closeTag + 1;
+                        continue;
+                    }
+                }
+
+                // Handle <blockquote>...</blockquote>
+                if (rawContent.compare(nextTag, 11, "<blockquote", 11) == 0 && (rawContent[nextTag + 11] == '>' || rawContent[nextTag + 11] == ' ')) {
+                    size_t closeTag = rawContent.find('>', nextTag);
+                    if (closeTag == std::string::npos) break;
+                    size_t endBq = rawContent.find("</blockquote>", closeTag);
+                    if (endBq != std::string::npos) {
+                        std::string bqContent = rawContent.substr(closeTag + 1, endBq - closeTag - 1);
+                        d.lines.push_back("<blockquote>" + bqContent + "</blockquote>");
+                        pos = endBq + 13;
+                        continue;
+                    }
+                }
+
+                // Handle <table>...</table>
+                if (rawContent.compare(nextTag, 6, "<table", 6) == 0 && (rawContent[nextTag + 6] == '>' || rawContent[nextTag + 6] == ' ')) {
+                    size_t endTable = rawContent.find("</table>", nextTag);
+                    if (endTable != std::string::npos) {
+                        std::string tableContent = rawContent.substr(nextTag, endTable + 8 - nextTag);
+                        std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)", std::regex::icase);
+                        std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)", std::regex::icase);
+
+                        auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
+                        auto trEnd = std::sregex_iterator();
+                        std::vector<std::vector<std::string>> parsedRows;
+
+                        for (auto tri = trBegin; tri != trEnd; ++tri) {
+                            std::string rowHtml = (*tri)[1].str();
+                            std::vector<std::string> cells;
+                            auto cellBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), cellRegex);
+                            auto cellEnd = std::sregex_iterator();
+                            for (auto ci = cellBegin; ci != cellEnd; ++ci) {
+                                std::string cText = (*ci)[2].str();
+                                cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)", std::regex::icase), "");
+                                cells.push_back(formatInlineHtmlToMarkdown(cText));
+                            }
+                            if (!cells.empty()) parsedRows.push_back(cells);
+                        }
+
+                        if (!parsedRows.empty()) {
+                            size_t maxCols = 0;
+                            for (const auto &r : parsedRows) maxCols = std::max(maxCols, r.size());
+
+                            std::string headerLine = "|";
+                            for (size_t c = 0; c < maxCols; ++c) {
+                                std::string val = (c < parsedRows[0].size()) ? parsedRows[0][c] : " ";
+                                headerLine += " " + val + " |";
+                            }
+                            d.lines.push_back(headerLine);
+
+                            std::string sepLine = "|";
+                            for (size_t c = 0; c < maxCols; ++c) {
+                                sepLine += " --- |";
+                            }
+                            d.lines.push_back(sepLine);
+
+                            for (size_t r = 1; r < parsedRows.size(); ++r) {
+                                std::string rowLine = "|";
+                                for (size_t c = 0; c < maxCols; ++c) {
+                                    std::string val = (c < parsedRows[r].size()) ? parsedRows[r][c] : " ";
+                                    rowLine += " " + val + " |";
+                                }
+                                d.lines.push_back(rowLine);
+                            }
+                        }
+                        pos = endTable + 8;
+                        continue;
+                    }
+                }
+
+                // Handle <p>...</p>
                 if (rawContent.compare(nextTag, 2, "<p", 2) == 0 && (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag == std::string::npos) break;
@@ -548,6 +707,7 @@ private:
                     continue;
                 }
 
+                // Handle <li>...</li>
                 if (rawContent.compare(nextTag, 3, "<li", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag == std::string::npos) break;
@@ -569,10 +729,27 @@ private:
         } else {
             std::stringstream ss(rawContent);
             std::string line;
+            bool inStyleTag = false;
             while (std::getline(ss, line)) {
                 if (!line.empty() && line.back() == '\r') line.pop_back();
 
-                if (ext == "md" || ext == "txt") {
+                if (line.find("<style") != std::string::npos) {
+                    inStyleTag = true;
+                    if (line.find("</style>") != std::string::npos) inStyleTag = false;
+                    continue;
+                }
+                if (inStyleTag) {
+                    if (line.find("</style>") != std::string::npos) inStyleTag = false;
+                    continue;
+                }
+                if (line.find("<head") != std::string::npos || line.find("</head>") != std::string::npos ||
+                    line.find("<!DOCTYPE") != std::string::npos || line.find("<html") != std::string::npos ||
+                    line.find("</html>") != std::string::npos || line.find("<body") != std::string::npos ||
+                    line.find("</body>") != std::string::npos) {
+                    continue;
+                }
+
+                if (ext == "md" || ext == "txt" || rawContent.find("<html") == std::string::npos) {
                     if (line.rfind("- ", 0) == 0 || line.rfind("* ", 0) == 0) {
                         line = "• " + line.substr(2);
                     } else if (line == "---" || line == "***" || line == "___") {
@@ -633,6 +810,13 @@ private:
 
         bool prevModified = doc().modified;
 
+        std::string ext = "";
+        size_t dot = doc().filePath.find_last_of('.');
+        if (dot != std::string::npos) {
+            ext = doc().filePath.substr(dot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        }
+
         if (targetMode == TuiMode::Code) {
             std::string raw = serializeDocToRaw(doc());
             doc().lines.clear();
@@ -645,12 +829,30 @@ private:
             if (doc().lines.empty()) doc().lines.push_back("");
             doc().mode = TuiMode::Code;
         } else {
+            // Switching from Code -> RichText
             std::ostringstream ss;
             for (size_t i = 0; i < doc().lines.size(); ++i) {
                 ss << doc().lines[i];
                 if (i + 1 < doc().lines.size()) ss << "\n";
             }
-            deserializeRawToRich(doc(), ss.str());
+            std::string rawBuffer = ss.str();
+
+            // Check if buffer contains HTML tags or is an HTML document
+            bool hasHtml = (ext == "html" || ext == "htm" ||
+                            rawBuffer.find("<html") != std::string::npos ||
+                            rawBuffer.find("<!DOCTYPE") != std::string::npos ||
+                            rawBuffer.find("<p") != std::string::npos ||
+                            rawBuffer.find("<h") != std::string::npos ||
+                            rawBuffer.find("<table") != std::string::npos);
+
+            if (hasHtml) {
+                deserializeRawToRich(doc(), rawBuffer);
+            } else if (ext == "md" || doc().filePath.empty()) {
+                // If the file is Markdown or text in Code mode, convert it cleanly into rich lines
+                deserializeRawToRich(doc(), rawBuffer);
+            } else {
+                deserializeRawToRich(doc(), rawBuffer);
+            }
             doc().mode = TuiMode::RichText;
         }
 
@@ -759,20 +961,18 @@ private:
         bool savingAsMd = (ext == "md" || targetFormat == 1);
         bool savingAsTxt = (ext == "txt" || targetFormat == 2);
 
-        bool bufferHasHtml = false;
-        for (const auto &l : doc().lines) {
-            if (l.find("<html") != std::string::npos || l.find("<!DOCTYPE") != std::string::npos ||
-                l.find("<p") != std::string::npos || l.find("<div") != std::string::npos ||
-                l.find("<table") != std::string::npos) {
-                bufferHasHtml = true;
-                break;
-            }
-        }
-
         std::string finalOutput;
 
         if (savingAsHtml) {
-            if (bufferHasHtml) {
+            bool bufferHasHtmlDoc = false;
+            for (const auto &l : doc().lines) {
+                if (l.find("<!DOCTYPE") != std::string::npos || l.find("<html") != std::string::npos) {
+                    bufferHasHtmlDoc = true;
+                    break;
+                }
+            }
+
+            if (doc().mode == TuiMode::Code && bufferHasHtmlDoc) {
                 std::ostringstream ss;
                 for (size_t i = 0; i < doc().lines.size(); ++i) {
                     ss << doc().lines[i];
@@ -783,15 +983,27 @@ private:
                 finalOutput = serializeLinesToHtml(doc().lines);
             }
         } else if (savingAsMd) {
-            if (bufferHasHtml) {
-                finalOutput = serializeLinesToMarkdown(doc().lines);
-            } else {
+            bool bufferHasHtml = false;
+            for (const auto &l : doc().lines) {
+                if (l.find("<p") != std::string::npos || l.find("<table") != std::string::npos ||
+                    l.find("<h") != std::string::npos || l.find("<strong") != std::string::npos ||
+                    l.find("<b>") != std::string::npos || l.find("<em") != std::string::npos ||
+                    l.find("<i>") != std::string::npos || l.find("<code") != std::string::npos ||
+                    l.find("<hr") != std::string::npos || l.find("• ") != std::string::npos) {
+                    bufferHasHtml = true;
+                    break;
+                }
+            }
+
+            if (doc().mode == TuiMode::Code && !bufferHasHtml) {
                 std::ostringstream ss;
                 for (size_t i = 0; i < doc().lines.size(); ++i) {
                     ss << doc().lines[i];
                     if (i + 1 < doc().lines.size()) ss << "\n";
                 }
                 finalOutput = ss.str();
+            } else {
+                finalOutput = serializeLinesToMarkdown(doc().lines);
             }
         } else if (savingAsTxt) {
             finalOutput = serializeLinesToPlainText(doc().lines);
@@ -1037,7 +1249,7 @@ private:
                 if (mx >= offset && mx < offset + menuLen) {
                     int sel = static_cast<int>(i);
                     TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                        [this](int m, int it) { executeMenuAction(m, it); });
+                                         [this](int m, int it) { executeMenuAction(m, it); });
                     return;
                 }
                 offset += menuLen;
@@ -1152,7 +1364,8 @@ private:
             targetLine = std::clamp(targetLine, 0, static_cast<int>(doc().lines.size()) - 1);
 
             if (doc().mode == TuiMode::Code && mx < lineNumWidth) {
-                doc().selectionAnchor = {targetLine, 0};
+                doc().selectionAnchor.line = targetLine;
+                doc().selectionAnchor.col = 0;
                 doc().cursor.line = targetLine;
                 doc().cursor.col = static_cast<int>(doc().lines[targetLine].length());
                 doc().hasSelection = true;
@@ -1227,7 +1440,7 @@ private:
         if (ch == KEY_F(11)) {
             int sel = 0;
             TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                [this](int m, int it) { executeMenuAction(m, it); });
+                                 [this](int m, int it) { executeMenuAction(m, it); });
             return;
         }
         if (ch == KEY_F(12) || ch == 17) { promptQuit(); return; }
