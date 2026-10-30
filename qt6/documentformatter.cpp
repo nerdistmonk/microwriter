@@ -172,7 +172,32 @@ void insertHorizontalLine(EditorView *editor) {
 
 void insertBlockquote(EditorView *editor) {
     if (!editor) return;
-    editor->textCursor().insertHtml("<blockquote style=\"border-left: 3px solid #007acc; margin: 10px 0; padding-left: 10px; color: #555;\"><p>Type blockquote text here...</p></blockquote>");
+
+    QTextCursor cursor = editor->textCursor();
+    if (cursor.hasSelection()) {
+        const int selectionStart = qMin(cursor.selectionStart(), cursor.selectionEnd());
+        const int selectionEnd = qMax(cursor.selectionStart(), cursor.selectionEnd());
+        const QString selected = editor->textCursor().selectedText();
+        if (!selected.isEmpty()) {
+            QStringList lines = selected.split('\n');
+            for (QString &line : lines) {
+                if (!line.trimmed().isEmpty()) {
+                    line.prepend("> ");
+                }
+            }
+            cursor.setPosition(selectionStart);
+            cursor.setPosition(selectionEnd, QTextCursor::KeepAnchor);
+            cursor.insertText(lines.join('\n'));
+            return;
+        }
+    }
+
+    QTextBlockFormat blockFormat = cursor.blockFormat();
+    const bool currentlyQuoted = blockFormat.leftMargin() > 0;
+    blockFormat.setLeftMargin(currentlyQuoted ? 0 : 30);
+    blockFormat.setRightMargin(0);
+    blockFormat.setIndent(0);
+    cursor.setBlockFormat(blockFormat);
 }
 
 void insertTable(EditorView *editor, QWidget *parent) {
