@@ -38,12 +38,70 @@ static std::string formatInlineMarkdownToHtml(std::string text) {
 }
 
 static std::string formatInlineHtmlToMarkdown(std::string text) {
-    text = std::regex_replace(text, std::regex(R"(<code[^>]*>(.*?)</code>)"), "`$1`");
-    text = std::regex_replace(text, std::regex(R"(<(strong|b)[^>]*>(.*?)</\1>)"), "**$2**");
-    text = std::regex_replace(text, std::regex(R"(<(em|i)[^>]*>(.*?)</\1>)"), "*$2*");
-    text = std::regex_replace(text, std::regex(R"(<span[^>]*font-weight:\s*(700|bold)[^>]*>(.*?)</span>)"), "**$2**");
-    text = std::regex_replace(text, std::regex(R"(<span[^>]*>(.*?)</span>)"), "$1");
+    text = std::regex_replace(text, std::regex(R"(<code[^>]*>([\s\S]*?)</code>)"), "`$1`");
+    text = std::regex_replace(text, std::regex(R"(<(strong|b)[^>]*>([\s\S]*?)</\1>)"), "**$2**");
+    text = std::regex_replace(text, std::regex(R"(<(em|i)[^>]*>([\s\S]*?)</\1>)"), "*$2*");
+    text = std::regex_replace(text, std::regex(R"(<span[^>]*font-weight:\s*(700|bold)[^>]*>([\s\S]*?)</span>)"), "**$2**");
+    text = std::regex_replace(text, std::regex(R"(<span[^>]*>([\s\S]*?)</span>)"), "$1");
     return text;
+}
+
+static std::vector<std::vector<std::string>> parseHtmlTableRows(const std::string &tableHtml) {
+    std::string normalized = tableHtml;
+
+    // Drop any leading example text before the first actual <tr>
+    normalized = std::regex_replace(normalized, std::regex(R"(^[\s\S]*?(?=<tr\b))", std::regex::icase), "");
+
+    // Strip common wrapper tags
+    normalized = std::regex_replace(normalized, std::regex(R"(<table\b[^>]*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(</table\s*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(<tbody\b[^>]*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(</tbody\s*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(<thead\b[^>]*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(</thead\s*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(<tfoot\b[^>]*>)", std::regex::icase), "");
+    normalized = std::regex_replace(normalized, std::regex(R"(</tfoot\s*>)", std::regex::icase), "");
+
+    std::regex trRegex(R"(<tr\b[^>]*>([\s\S]*?)</tr\s*>)", std::regex::icase);
+    std::regex cellRegex(R"(<(td|th)\b[^>]*>([\s\S]*?)</\1\s*>)", std::regex::icase);
+
+    std::vector<std::vector<std::string>> rows;
+    auto trBegin = std::sregex_iterator(normalized.begin(), normalized.end(), trRegex);
+    auto trEnd = std::sregex_iterator();
+
+    for (auto tri = trBegin; tri != trEnd; ++tri) {
+        std::string rowHtml = (*tri)[1].str();
+
+        // Remove the row wrapper itself before parsing cells
+        rowHtml = std::regex_replace(rowHtml, std::regex(R"(^\s*<tr\b[^>]*>)", std::regex::icase), "");
+        rowHtml = std::regex_replace(rowHtml, std::regex(R"(</tr\s*>\s*$)", std::regex::icase), "");
+
+        std::vector<std::string> cells;
+        auto cellBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), cellRegex);
+        auto cellEnd = std::sregex_iterator();
+
+        for (auto ci = cellBegin; ci != cellEnd; ++ci) {
+            std::string cellText = (*ci)[2].str();
+
+            // Strip stray row/cell wrapper text that sometimes remains in the first cell
+            cellText = std::regex_replace(cellText, std::regex(R"(^\s*<tr\b[^>]*>)", std::regex::icase), "");
+            cellText = std::regex_replace(cellText, std::regex(R"(</tr\s*>\s*$)", std::regex::icase), "");
+            cellText = std::regex_replace(cellText, std::regex(R"(^\s*<(?:td|th)\b[^>]*>)", std::regex::icase), "");
+            cellText = std::regex_replace(cellText, std::regex(R"(</(?:td|th)\s*>\s*$)", std::regex::icase), "");
+
+            cellText = std::regex_replace(cellText, std::regex(R"(</?p[^>]*>)", std::regex::icase), "");
+            cellText = std::regex_replace(cellText, std::regex(R"(<br\s*/?>)", std::regex::icase), "\n");
+            cellText = std::regex_replace(cellText, std::regex(R"(\s*\n\s*)"), " ");
+            cellText = std::regex_replace(cellText, std::regex(R"(^\s+|\s+$)"), "");
+            cells.push_back(formatInlineHtmlToMarkdown(cellText));
+        }
+
+        if (!cells.empty()) {
+            rows.push_back(cells);
+        }
+    }
+
+    return rows;
 }
 
 class NcursesEditor {
@@ -160,16 +218,12 @@ private:
 
             if (l.find("<style") != std::string::npos) {
                 inStyle = true;
-                if (l.find("</style>") != std::string::npos) {
-                    inStyle = false;
-                }
+                if (l.find("</style>") != std::string::npos) inStyle = false;
                 ++i;
                 continue;
             }
             if (inStyle) {
-                if (l.find("</style>") != std::string::npos) {
-                    inStyle = false;
-                }
+                if (l.find("</style>") != std::string::npos) inStyle = false;
                 ++i;
                 continue;
             }
@@ -182,25 +236,7 @@ private:
                     ++i;
                 }
 
-                std::vector<std::vector<std::string>> rows;
-                std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)", std::regex::icase);
-                std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)", std::regex::icase);
-
-                auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
-                auto trEnd = std::sregex_iterator();
-                for (auto tri = trBegin; tri != trEnd; ++tri) {
-                    std::string rowHtml = (*tri)[1].str();
-                    std::vector<std::string> cells;
-                    auto cellBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), cellRegex);
-                    auto cellEnd = std::sregex_iterator();
-                    for (auto ci = cellBegin; ci != cellEnd; ++ci) {
-                        std::string cText = (*ci)[2].str();
-                        cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)", std::regex::icase), "");
-                        cells.push_back(formatInlineHtmlToMarkdown(cText));
-                    }
-                    if (!cells.empty()) rows.push_back(cells);
-                }
-
+                auto rows = parseHtmlTableRows(tableContent);
                 if (!rows.empty()) {
                     size_t maxCols = 0;
                     for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
@@ -225,11 +261,12 @@ private:
                     }
                     out << "\n";
                 }
+
                 ++i;
                 continue;
             }
 
-            std::regex hRegex(R"(<h([1-6])[^>]*>(.*?)</h\1>)", std::regex::icase);
+            std::regex hRegex(R"(<h([1-6])\b[^>]*>([\s\S]*?)</h\1\s*>)", std::regex::icase);
             std::smatch hMatch;
             if (std::regex_search(l, hMatch, hRegex)) {
                 int level = std::stoi(hMatch[1].str());
@@ -240,7 +277,7 @@ private:
                 continue;
             }
 
-            std::regex liRegex(R"(<li[^>]*>(.*?)</li>)", std::regex::icase);
+            std::regex liRegex(R"(<li\b[^>]*>([\s\S]*?)</li\s*>)", std::regex::icase);
             std::smatch liMatch;
             if (std::regex_search(l, liMatch, liRegex)) {
                 std::string content = liMatch[1].str();
@@ -256,7 +293,7 @@ private:
             }
 
             if (l.find("<blockquote") != std::string::npos) {
-                std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*>)", std::regex::icase), "");
+                std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*)", std::regex::icase), "");
                 size_t first = q.find_first_not_of(" \t");
                 q = (first != std::string::npos) ? ("> " + q.substr(first)) : "> ";
                 out << formatInlineHtmlToMarkdown(q) << "\n\n";
@@ -264,7 +301,7 @@ private:
                 continue;
             }
 
-            std::regex pRegex(R"(<p[^>]*>(.*?)</p>)", std::regex::icase);
+            std::regex pRegex(R"(<p\b[^>]*>([\s\S]*?)</p\s*>)", std::regex::icase);
             std::smatch pMatch;
             if (std::regex_search(l, pMatch, pRegex)) {
                 std::string content = pMatch[1].str();
@@ -549,7 +586,6 @@ private:
                 size_t nextTag = rawContent.find('<', pos);
                 if (nextTag == std::string::npos) break;
 
-                // Handle <style>...</style> block skipping
                 if (rawContent.compare(nextTag, 6, "<style", 6) == 0) {
                     size_t endStyle = rawContent.find("</style>", nextTag);
                     if (endStyle != std::string::npos) {
@@ -557,7 +593,6 @@ private:
                         continue;
                     }
                 }
-                // Handle <head>...</head> block skipping
                 if (rawContent.compare(nextTag, 5, "<head", 5) == 0) {
                     size_t endHead = rawContent.find("</head>", nextTag);
                     if (endHead != std::string::npos) {
@@ -566,7 +601,6 @@ private:
                     }
                 }
 
-                // Handle <ol>
                 if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
                     insideOl = true;
                     currentOlNum = 1;
@@ -578,7 +612,6 @@ private:
                     pos = nextTag + 5;
                     continue;
                 }
-                // Handle <ul>
                 if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
                     insideOl = false;
                     pos = rawContent.find('>', nextTag) + 1;
@@ -589,8 +622,8 @@ private:
                     continue;
                 }
 
-                // Handle Headings: <h1> through <h6>
-                if (nextTag + 3 < rawContent.length() && (rawContent[nextTag + 1] == 'h' || rawContent[nextTag + 1] == 'H') &&
+                if (nextTag + 3 < rawContent.length() &&
+                    (rawContent[nextTag + 1] == 'h' || rawContent[nextTag + 1] == 'H') &&
                     (rawContent[nextTag + 2] >= '1' && rawContent[nextTag + 2] <= '6') &&
                     (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
                     char hDigit = rawContent[nextTag + 2];
@@ -611,8 +644,8 @@ private:
                     }
                 }
 
-                // Handle <hr> / <hr />
-                if (rawContent.compare(nextTag, 3, "<hr", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ' || rawContent[nextTag + 3] == '/')) {
+                if (rawContent.compare(nextTag, 3, "<hr", 3) == 0 &&
+                    (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ' || rawContent[nextTag + 3] == '/')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag != std::string::npos) {
                         d.lines.push_back("<hr>");
@@ -621,8 +654,8 @@ private:
                     }
                 }
 
-                // Handle <blockquote>...</blockquote>
-                if (rawContent.compare(nextTag, 11, "<blockquote", 11) == 0 && (rawContent[nextTag + 11] == '>' || rawContent[nextTag + 11] == ' ')) {
+                if (rawContent.compare(nextTag, 11, "<blockquote", 11) == 0 &&
+                    (rawContent[nextTag + 11] == '>' || rawContent[nextTag + 11] == ' ')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag == std::string::npos) break;
                     size_t endBq = rawContent.find("</blockquote>", closeTag);
@@ -634,38 +667,20 @@ private:
                     }
                 }
 
-                // Handle <table>...</table>
-                if (rawContent.compare(nextTag, 6, "<table", 6) == 0 && (rawContent[nextTag + 6] == '>' || rawContent[nextTag + 6] == ' ')) {
+                if (rawContent.compare(nextTag, 6, "<table", 6) == 0 &&
+                    (rawContent[nextTag + 6] == '>' || rawContent[nextTag + 6] == ' ')) {
                     size_t endTable = rawContent.find("</table>", nextTag);
                     if (endTable != std::string::npos) {
                         std::string tableContent = rawContent.substr(nextTag, endTable + 8 - nextTag);
-                        std::regex trRegex(R"(<tr[^>]*>(.*?)</tr>)", std::regex::icase);
-                        std::regex cellRegex(R"(<(td|th)[^>]*>(.*?)</\1>)", std::regex::icase);
+                        auto rows = parseHtmlTableRows(tableContent);
 
-                        auto trBegin = std::sregex_iterator(tableContent.begin(), tableContent.end(), trRegex);
-                        auto trEnd = std::sregex_iterator();
-                        std::vector<std::vector<std::string>> parsedRows;
-
-                        for (auto tri = trBegin; tri != trEnd; ++tri) {
-                            std::string rowHtml = (*tri)[1].str();
-                            std::vector<std::string> cells;
-                            auto cellBegin = std::sregex_iterator(rowHtml.begin(), rowHtml.end(), cellRegex);
-                            auto cellEnd = std::sregex_iterator();
-                            for (auto ci = cellBegin; ci != cellEnd; ++ci) {
-                                std::string cText = (*ci)[2].str();
-                                cText = std::regex_replace(cText, std::regex(R"(</?p[^>]*>)", std::regex::icase), "");
-                                cells.push_back(formatInlineHtmlToMarkdown(cText));
-                            }
-                            if (!cells.empty()) parsedRows.push_back(cells);
-                        }
-
-                        if (!parsedRows.empty()) {
+                        if (!rows.empty()) {
                             size_t maxCols = 0;
-                            for (const auto &r : parsedRows) maxCols = std::max(maxCols, r.size());
+                            for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
 
                             std::string headerLine = "|";
                             for (size_t c = 0; c < maxCols; ++c) {
-                                std::string val = (c < parsedRows[0].size()) ? parsedRows[0][c] : " ";
+                                std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
                                 headerLine += " " + val + " |";
                             }
                             d.lines.push_back(headerLine);
@@ -676,22 +691,23 @@ private:
                             }
                             d.lines.push_back(sepLine);
 
-                            for (size_t r = 1; r < parsedRows.size(); ++r) {
+                            for (size_t r = 1; r < rows.size(); ++r) {
                                 std::string rowLine = "|";
                                 for (size_t c = 0; c < maxCols; ++c) {
-                                    std::string val = (c < parsedRows[r].size()) ? parsedRows[r][c] : " ";
+                                    std::string val = (c < rows[r].size()) ? rows[r][c] : " ";
                                     rowLine += " " + val + " |";
                                 }
                                 d.lines.push_back(rowLine);
                             }
                         }
+
                         pos = endTable + 8;
                         continue;
                     }
                 }
 
-                // Handle <p>...</p>
-                if (rawContent.compare(nextTag, 2, "<p", 2) == 0 && (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
+                if (rawContent.compare(nextTag, 2, "<p", 2) == 0 &&
+                    (rawContent[nextTag + 2] == '>' || rawContent[nextTag + 2] == ' ')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag == std::string::npos) break;
                     size_t endP = rawContent.find("</p>", closeTag);
@@ -707,8 +723,8 @@ private:
                     continue;
                 }
 
-                // Handle <li>...</li>
-                if (rawContent.compare(nextTag, 3, "<li", 3) == 0 && (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
+                if (rawContent.compare(nextTag, 3, "<li", 3) == 0 &&
+                    (rawContent[nextTag + 3] == '>' || rawContent[nextTag + 3] == ' ')) {
                     size_t closeTag = rawContent.find('>', nextTag);
                     if (closeTag == std::string::npos) break;
                     size_t endLi = rawContent.find("</li>", closeTag);
@@ -829,7 +845,6 @@ private:
             if (doc().lines.empty()) doc().lines.push_back("");
             doc().mode = TuiMode::Code;
         } else {
-            // Switching from Code -> RichText
             std::ostringstream ss;
             for (size_t i = 0; i < doc().lines.size(); ++i) {
                 ss << doc().lines[i];
@@ -837,7 +852,6 @@ private:
             }
             std::string rawBuffer = ss.str();
 
-            // Check if buffer contains HTML tags or is an HTML document
             bool hasHtml = (ext == "html" || ext == "htm" ||
                             rawBuffer.find("<html") != std::string::npos ||
                             rawBuffer.find("<!DOCTYPE") != std::string::npos ||
@@ -848,7 +862,6 @@ private:
             if (hasHtml) {
                 deserializeRawToRich(doc(), rawBuffer);
             } else if (ext == "md" || doc().filePath.empty()) {
-                // If the file is Markdown or text in Code mode, convert it cleanly into rich lines
                 deserializeRawToRich(doc(), rawBuffer);
             } else {
                 deserializeRawToRich(doc(), rawBuffer);
@@ -1144,6 +1157,7 @@ private:
             else if (itemIdx == 10) {
                 doc().pushUndo();
                 doc().lines[doc().cursor.line].insert(doc().cursor.col, "<hr>");
+                doc().cursor.col += 4;
                 doc().modified = true;
             }
         } else if (menuIdx == 3) {
@@ -1249,7 +1263,7 @@ private:
                 if (mx >= offset && mx < offset + menuLen) {
                     int sel = static_cast<int>(i);
                     TuiMenu::runMenuLoop(m_documents, m_activeDocIdx, sel, m_topMenus, m_subMenus,
-                                         [this](int m, int it) { executeMenuAction(m, it); });
+                                          [this](int m, int it) { executeMenuAction(m, it); });
                     return;
                 }
                 offset += menuLen;
