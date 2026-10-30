@@ -144,6 +144,32 @@ int showConfirmModal(const std::string &title, const std::string &message) {
     }
 }
 
+static void updateExtensionForFormat(std::string &name, int newFmt) {
+    std::string targetExt = ".html";
+    if (newFmt == 1) targetExt = ".md";
+    else if (newFmt == 2) targetExt = ".txt";
+
+    if (name.empty()) {
+        name = "untitled" + targetExt;
+        return;
+    }
+
+    size_t dotPos = name.find_last_of('.');
+    size_t slashPos = name.find_last_of("/\\");
+
+    if (dotPos == std::string::npos || (slashPos != std::string::npos && dotPos < slashPos)) {
+        name += targetExt;
+    } else {
+        std::string curExt = name.substr(dotPos);
+        std::transform(curExt.begin(), curExt.end(), curExt.begin(), ::tolower);
+        if (curExt == ".html" || curExt == ".htm" || curExt == ".md" || curExt == ".txt") {
+            name = name.substr(0, dotPos) + targetExt;
+        } else {
+            name += targetExt;
+        }
+    }
+}
+
 bool showSaveAsModal(std::string &filePath, int &formatType) {
     int width = 60;
     int height = 9;
@@ -205,6 +231,7 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
                 else if (localY == 5) {
                     focusField = 1;
                     currentFmt = (currentFmt + 1) % 3;
+                    updateExtensionForFormat(inputName, currentFmt);
                 }
             }
             continue;
@@ -227,40 +254,18 @@ bool showSaveAsModal(std::string &filePath, int &formatType) {
         if (focusField == 1) {
             if (ch == ' ' || ch == KEY_RIGHT) {
                 currentFmt = (currentFmt + 1) % 3;
+                updateExtensionForFormat(inputName, currentFmt);
                 continue;
             }
             if (ch == KEY_LEFT) {
                 currentFmt = (currentFmt + 2) % 3;
+                updateExtensionForFormat(inputName, currentFmt);
                 continue;
             }
         }
 
         if (ch == 10 || ch == KEY_ENTER) {
-            std::string targetExt = ".html";
-            if (currentFmt == 1) targetExt = ".md";
-            else if (currentFmt == 2) targetExt = ".txt";
-
-            if (inputName.empty()) {
-                inputName = "untitled" + targetExt;
-            } else {
-                size_t dotPos = inputName.find_last_of('.');
-                size_t slashPos = inputName.find_last_of("/\\");
-                if (dotPos == std::string::npos || (slashPos != std::string::npos && dotPos < slashPos)) {
-                    inputName += targetExt;
-                } else {
-                    std::string curExt = inputName.substr(dotPos);
-                    std::transform(curExt.begin(), curExt.end(), curExt.begin(), ::tolower);
-                    if (curExt != ".html" && curExt != ".htm" && curExt != ".md" && curExt != ".txt" && curExt != ".cpp") {
-                        inputName += targetExt;
-                    } else if (currentFmt == 0 && (curExt == ".md" || curExt == ".txt")) {
-                        inputName = inputName.substr(0, dotPos) + ".html";
-                    } else if (currentFmt == 1 && (curExt == ".html" || curExt == ".htm" || curExt == ".txt")) {
-                        inputName = inputName.substr(0, dotPos) + ".md";
-                    } else if (currentFmt == 2 && (curExt == ".html" || curExt == ".htm" || curExt == ".md")) {
-                        inputName = inputName.substr(0, dotPos) + ".txt";
-                    }
-                }
-            }
+            updateExtensionForFormat(inputName, currentFmt);
 
             delwin(win);
             filePath = inputName;
@@ -854,7 +859,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
     static const std::vector<ScriptItem> scripts = {
         {
             "Strict Mode Boilerplate (set -euo pipefail)",
-            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n  echo \"Starting script...\"\n}\nmain \"$@\"\n"
+            "#!/usr/bin/env bash\nset -euo pipefail\nIFS=$'\\n\\t'\n\n# Main entry point\nmain() {\n    echo \"Starting script...\"\n}\nmain \"$@\"\n"
         },
         {
             "CLI Option & Argument Parser (getopts)",
@@ -862,7 +867,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
         },
         {
             "Traverse Directory & Loop Over Files Safe",
-            "while IFS= read -r -d '' file; do\n  echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
+            "while IFS= read -r -d '' file; do\n    echo \"Processing: $file\"\ndone < <(find . -type f -name \"*.cpp\" -print0)\n"
         },
         {
             "Temporary Directory with Auto-Cleanup Trap",
@@ -874,7 +879,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
         },
         {
             "Prompt User for Confirmation (y/N)",
-            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n  [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n  *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
+            "read -r -p \"Are you sure you want to proceed? [y/N] \" response\ncase \"$response\" in\n    [yY][eE][sS]|[yY]) echo \"Confirmed.\" ;;\n    *) echo \"Aborted.\"; exit 1 ;;\nesac\n"
         }
     };
 

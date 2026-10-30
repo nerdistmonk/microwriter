@@ -18,18 +18,23 @@ const std::vector<std::string> codeButtons = {
 
 namespace {
 
-static std::vector<std::string> wrapDisplaySegments(const std::string &line, int wrapWidth) {
-    std::vector<std::string> wrapped;
+struct DisplaySegment {
+    std::string text;
+    int colOffset = 0;
+};
+
+static std::vector<DisplaySegment> wrapDisplaySegmentsWithOffsets(const std::string &line, int wrapWidth) {
+    std::vector<DisplaySegment> segments;
     if (wrapWidth <= 0 || line.empty()) {
-        wrapped.push_back(line);
-        return wrapped;
+        segments.push_back({line, 0});
+        return segments;
     }
 
     size_t start = 0;
     while (start < line.size()) {
         size_t end = std::min(line.size(), start + static_cast<size_t>(wrapWidth));
         if (end >= line.size()) {
-            wrapped.push_back(line.substr(start));
+            segments.push_back({line.substr(start), static_cast<int>(start)});
             break;
         }
 
@@ -41,17 +46,17 @@ static std::vector<std::string> wrapDisplaySegments(const std::string &line, int
             split = end;
         }
 
-        wrapped.push_back(line.substr(start, split - start));
+        segments.push_back({line.substr(start, split - start), static_cast<int>(start)});
         start = split;
         while (start < line.size() && std::isspace(static_cast<unsigned char>(line[start]))) {
             ++start;
         }
     }
 
-    if (wrapped.empty()) {
-        wrapped.push_back(line);
+    if (segments.empty()) {
+        segments.push_back({line, 0});
     }
-    return wrapped;
+    return segments;
 }
 
 static int effectiveWrapWidth(const EditorDocument &doc, int lineNumWidth) {
@@ -73,7 +78,7 @@ static std::vector<int> buildWrapStarts(const std::vector<std::string> &lines, i
 
     int current = 0;
     for (const std::string &line : lines) {
-        const auto segments = wrapDisplaySegments(line, wrapWidth);
+        const auto segments = wrapDisplaySegmentsWithOffsets(line, wrapWidth);
         current += static_cast<int>(segments.size());
         starts.push_back(current);
     }
@@ -81,16 +86,34 @@ static std::vector<int> buildWrapStarts(const std::vector<std::string> &lines, i
     return starts;
 }
 
-static int wrappedRowForCursor(const std::string &line, int cursorCol, int wrapWidth) {
-    if (wrapWidth <= 0 || cursorCol <= 0) {
-        return 0;
+static int wrappedRowForCursor(const std::vector<DisplaySegment> &segments, int cursorCol) {
+    if (segments.empty() || cursorCol <= 0) return 0;
+    for (int i = static_cast<int>(segments.size()) - 1; i >= 0; --i) {
+        if (cursorCol >= segments[i].colOffset) {
+            return i;
+        }
     }
-    return cursorCol / wrapWidth;
+    return 0;
 }
 
-} // namespace
+static void printCharWithSelection(int screenY, int screenX, char ch, bool selected, chtype baseAttr = 0) {
+    if (screenX >= COLS) return;
+    if (baseAttr) attron(baseAttr);
+    if (selected) attron(A_REVERSE);
+    mvaddch(screenY, screenX, ch);
+    if (selected) attroff(A_REVERSE);
+    if (baseAttr) attroff(baseAttr);
+}
 
-static void highlightCodeLine(int screenY, int startX, const std::string &line, int initialBracketDepth) {
+static void highlightCodeLine(
+    int screenY,
+    int startX,
+    const std::string &line,
+    int colOffset,
+    int logicalLine,
+    const std::function<bool(int, int)> &isSelected,
+    int initialBracketDepth
+) {
     static const std::unordered_set<std::string> keywords = {
         "char", "class", "const", "double", "enum", "explicit", "friend", "inline",
         "int", "long", "namespace", "operator", "private", "protected", "public",
@@ -108,15 +131,17 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
 
     while (i < line.length() && startX + static_cast<int>(i) < COLS) {
         if (i + 1 < line.length() && line[i] == '/' && line[i + 1] == '/') {
-            attron(COLOR_PAIR(4) | A_DIM);
-            mvprintw(screenY, startX + static_cast<int>(i), "%s", line.substr(i).c_str());
-            attroff(COLOR_PAIR(4) | A_DIM);
+            for (size_t k = i; k < line.length() && startX + static_cast<int>(k) < COLS; ++k) {
+                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
+                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(4) | A_DIM);
+            }
             break;
         }
         if (line[i] == '#') {
-            attron(COLOR_PAIR(4) | A_DIM);
-            mvprintw(screenY, startX + static_cast<int>(i), "%s", line.substr(i).c_str());
-            attroff(COLOR_PAIR(4) | A_DIM);
+            for (size_t k = i; k < line.length() && startX + static_cast<int>(k) < COLS; ++k) {
+                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
+                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(4) | A_DIM);
+            }
             break;
         }
 
@@ -130,20 +155,18 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
                 }
                 j++;
             }
-            attron(COLOR_PAIR(3));
             for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                mvaddch(screenY, startX + static_cast<int>(k), line[k]);
+                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
+                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(3));
             }
-            attroff(COLOR_PAIR(3));
             i = j;
             continue;
         }
 
         if (line[i] == '(' || line[i] == '{' || line[i] == '[') {
             int pairIdx = bracketColorPairs[depth % 5];
-            attron(COLOR_PAIR(pairIdx) | A_BOLD);
-            mvaddch(screenY, startX + static_cast<int>(i), line[i]);
-            attroff(COLOR_PAIR(pairIdx) | A_BOLD);
+            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
+            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(pairIdx) | A_BOLD);
             depth++;
             i++;
             continue;
@@ -151,9 +174,8 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
         if (line[i] == ')' || line[i] == '}' || line[i] == ']') {
             depth = std::max(0, depth - 1);
             int pairIdx = bracketColorPairs[depth % 5];
-            attron(COLOR_PAIR(pairIdx) | A_BOLD);
-            mvaddch(screenY, startX + static_cast<int>(i), line[i]);
-            attroff(COLOR_PAIR(pairIdx) | A_BOLD);
+            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
+            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(pairIdx) | A_BOLD);
             i++;
             continue;
         }
@@ -163,11 +185,10 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
             while (j < line.length() && (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '.')) {
                 j++;
             }
-            attron(COLOR_PAIR(2));
             for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                mvaddch(screenY, startX + static_cast<int>(k), line[k]);
+                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
+                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(2));
             }
-            attroff(COLOR_PAIR(2));
             i = j;
             continue;
         }
@@ -178,23 +199,22 @@ static void highlightCodeLine(int screenY, int startX, const std::string &line, 
                 j++;
             }
             std::string word = line.substr(i, j - i);
-            if (keywords.count(word)) {
-                attron(COLOR_PAIR(1) | A_BOLD);
-                mvprintw(screenY, startX + static_cast<int>(i), "%s", word.c_str());
-                attroff(COLOR_PAIR(1) | A_BOLD);
-            } else {
-                for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                    mvaddch(screenY, startX + static_cast<int>(k), line[k]);
-                }
+            chtype attr = keywords.count(word) ? (COLOR_PAIR(1) | A_BOLD) : 0;
+            for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
+                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
+                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, attr);
             }
             i = j;
             continue;
         }
 
-        mvaddch(screenY, startX + static_cast<int>(i), line[i]);
+        bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
+        printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, 0);
         i++;
     }
 }
+
+} // namespace
 
 void render(
     const std::vector<EditorDocument> &documents,
@@ -254,7 +274,25 @@ void render(
     bool useWrap = (doc.wrapMode != TuiWrapMode::Off && wrapWidth > 0);
 
     const char *wrapLabel = (doc.wrapMode == TuiWrapMode::Off) ? "Off" :
-                            (doc.wrapMode == TuiWrapMode::Soft ? "Soft" : "Hard");
+        (doc.wrapMode == TuiWrapMode::Soft ? "Soft" : "Hard");
+
+    // Compute normalized selection range
+    TextPosition selStart = doc.cursor;
+    TextPosition selEnd = doc.selectionAnchor;
+    if (selEnd < selStart) {
+        std::swap(selStart, selEnd);
+    }
+
+    auto isSelected = [&](int l, int c) -> bool {
+        if (!doc.hasSelection) return false;
+        if (l < selStart.line || l > selEnd.line) return false;
+        if (l == selStart.line && l == selEnd.line) {
+            return c >= selStart.col && c < selEnd.col;
+        }
+        if (l == selStart.line) return c >= selStart.col;
+        if (l == selEnd.line) return c < selEnd.col;
+        return true;
+    };
 
     int runningDepth = 0;
     if (doc.mode == TuiMode::Code) {
@@ -283,6 +321,7 @@ void render(
         int rowIndex = scrollBase + y;
         int logicalLine = doc.scrollLine;
         std::string displayText;
+        int colOffset = 0;
 
         if (useWrap) {
             if (!wrapStarts.empty()) {
@@ -294,18 +333,20 @@ void render(
                     continue;
                 }
 
-                const auto segments = wrapDisplaySegments(doc.lines[logicalLine], wrapWidth);
+                const auto segments = wrapDisplaySegmentsWithOffsets(doc.lines[logicalLine], wrapWidth);
                 int segmentIndex = displayRow - wrapStarts[logicalLine];
                 if (segmentIndex >= 0 && segmentIndex < static_cast<int>(segments.size())) {
-                    displayText = segments[segmentIndex];
+                    displayText = segments[segmentIndex].text;
+                    colOffset = segments[segmentIndex].colOffset;
                 } else {
                     continue;
                 }
             }
-        } else if (logicalLine < static_cast<int>(doc.lines.size())) {
+        } else {
             logicalLine = doc.scrollLine + y;
             if (logicalLine < static_cast<int>(doc.lines.size())) {
                 displayText = doc.lines[logicalLine];
+                colOffset = 0;
             }
         }
 
@@ -313,20 +354,18 @@ void render(
             continue;
         }
 
-        if (doc.mode == TuiMode::Code && !useWrap) {
-            if (doc.scrollLine + y < static_cast<int>(doc.lines.size())) {
-                attron(COLOR_PAIR(3));
-                mvprintw(screenY, 0, "%4d |", doc.scrollLine + y + 1);
-                attroff(COLOR_PAIR(3));
-            }
-        }
-
-        if (doc.mode == TuiMode::Code && useWrap) {
-            if (logicalLine < static_cast<int>(doc.lines.size())) {
-                attron(COLOR_PAIR(3));
+        if (doc.mode == TuiMode::Code) {
+            attron(COLOR_PAIR(3));
+            if (!useWrap) {
                 mvprintw(screenY, 0, "%4d |", logicalLine + 1);
-                attroff(COLOR_PAIR(3));
+            } else {
+                if (colOffset == 0) {
+                    mvprintw(screenY, 0, "%4d |", logicalLine + 1);
+                } else {
+                    mvprintw(screenY, 0, "     |");
+                }
             }
+            attroff(COLOR_PAIR(3));
         }
 
         if (displayText.empty()) {
@@ -334,14 +373,15 @@ void render(
         }
 
         if (doc.mode == TuiMode::Code) {
-            highlightCodeLine(screenY, lineNumWidth, displayText, runningDepth);
+            highlightCodeLine(screenY, lineNumWidth, displayText, colOffset, logicalLine, isSelected, runningDepth);
             for (char c : displayText) {
                 if (c == '(' || c == '{' || c == '[') runningDepth++;
                 else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
             }
         } else {
             for (int x = 0; x < static_cast<int>(displayText.length()) && x + lineNumWidth < COLS; ++x) {
-                mvaddch(screenY, lineNumWidth + x, displayText[x]);
+                bool sel = isSelected(logicalLine, colOffset + x);
+                printCharWithSelection(screenY, lineNumWidth + x, displayText[x], sel, 0);
             }
         }
     }
@@ -359,22 +399,33 @@ void render(
     }
 
     mvprintw(LINES - 1, 1,
-             "Mode: %s | L:%d C:%d | W:%zu C:%zu | %s | %s | Wrap:%s | F1:Help F8/Ctrl+S:Save F11:Menu F12:Quit",
-             doc.mode == TuiMode::RichText ? "Rich" : "Code",
-             doc.cursor.line + 1, doc.cursor.col + 1, words, chars,
-             doc.encoding.c_str(), doc.eolFormat.c_str(), wrapLabel);
+        "Mode: %s | L:%d C:%d | W:%zu C:%zu | %s | %s | Wrap:%s | F1:Help F8/Ctrl+S:Save F11:Menu F12:Quit",
+        doc.mode == TuiMode::RichText ? "Rich" : "Code",
+        doc.cursor.line + 1, doc.cursor.col + 1, words, chars,
+        doc.encoding.c_str(), doc.eolFormat.c_str(), wrapLabel);
     attroff(COLOR_PAIR(2));
 
     int screenCursorY = contentTop + (doc.cursor.line - doc.scrollLine);
+    int screenCursorX = lineNumWidth + std::min(doc.cursor.col, static_cast<int>(COLS - lineNumWidth - 1));
+
     if (useWrap) {
-        int visualRow = wrapStarts.empty() ? 0 : wrapStarts[std::min(doc.cursor.line, static_cast<int>(wrapStarts.size() - 1))];
-        visualRow += wrappedRowForCursor(doc.lines[std::min(doc.cursor.line, static_cast<int>(doc.lines.size() - 1))], doc.cursor.col, wrapWidth);
+        int curLine = std::min(doc.cursor.line, static_cast<int>(doc.lines.size() - 1));
+        const auto segments = wrapDisplaySegmentsWithOffsets(doc.lines[curLine], wrapWidth);
+        int subRow = wrappedRowForCursor(segments, doc.cursor.col);
+        int visualRow = (wrapStarts.empty() || curLine >= static_cast<int>(wrapStarts.size())) ? 0 : wrapStarts[curLine];
+        visualRow += subRow;
         screenCursorY = contentTop + (visualRow - scrollBase);
+
+        int colInSegment = doc.cursor.col;
+        if (subRow < static_cast<int>(segments.size())) {
+            colInSegment = doc.cursor.col - segments[subRow].colOffset;
+        }
+        screenCursorX = lineNumWidth + std::min(colInSegment, static_cast<int>(COLS - lineNumWidth - 1));
     }
 
     if (screenCursorY >= contentTop && screenCursorY < contentTop + contentHeight) {
         curs_set(1);
-        move(screenCursorY, lineNumWidth + std::min(doc.cursor.col, static_cast<int>(COLS - lineNumWidth - 1)));
+        move(screenCursorY, screenCursorX);
     } else {
         curs_set(0);
     }
