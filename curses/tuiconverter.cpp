@@ -13,6 +13,11 @@ std::string stripHtmlHeadersAndStyle(std::string text) {
 }
 
 std::string formatInlineMarkdownToHtml(std::string text) {
+    // Markdown images: ![alt](url) -> <img src="url" alt="alt" />
+    text = std::regex_replace(text, std::regex(R"(!\[([^\]]*)\]\(([^)]+)\))"), R"(<img src="$2" alt="$1" />)");
+    // Markdown links: [text](url) -> <a href="url">text</a>
+    text = std::regex_replace(text, std::regex(R"((^|[^!])\[([^\]]+)\]\(([^)]+)\))"), R"($1<a href="$3">$2</a>)");
+    // Inline code, bold, and italic
     text = std::regex_replace(text, std::regex(R"(`([^`]+)`)"), "<code>$1</code>");
     text = std::regex_replace(text, std::regex(R"(\*\*([^*]+)\*\*)"), "<strong>$1</strong>");
     text = std::regex_replace(text, std::regex(R"(__([^_]+)__)"), "<strong>$1</strong>");
@@ -398,6 +403,8 @@ std::string serializeLinesToHtml(const std::vector<std::string> &lines) {
                        trimmed.find("<h") != std::string::npos || trimmed.find("<hr") != std::string::npos || trimmed.find("<blockquote") != std::string::npos) {
                 out << l << "\n";
             } else if (trimmed.rfind("<p", 0) == 0 && trimmed.find("</p>") != std::string::npos) {
+                out << l << "\n";
+            } else if (trimmed.rfind("<img", 0) == 0) {
                 out << l << "\n";
             } else {
                 out << "<p>" << formatInlineMarkdownToHtml(l) << "</p>\n";

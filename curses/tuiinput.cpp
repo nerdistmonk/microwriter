@@ -199,16 +199,22 @@ void handleMouseEvent(const MEVENT &event, TuiEditorContext &ctx) {
 
     if (my == 2 && (event.bstate & (BUTTON1_PRESSED | BUTTON1_CLICKED))) {
         int toolOffset = 1;
+        bool isMd = TuiActions::isMarkdownDoc(doc);
+
         if (doc.mode == TuiMode::RichText) {
             for (size_t b = 0; b < TuiView::toolbarButtons.size(); ++b) {
                 int btnLen = static_cast<int>(TuiView::toolbarButtons[b].length()) + 4;
                 if (mx >= toolOffset && mx < toolOffset + btnLen) {
                     if (b == 0) ctx.saveCurrentFile();
                     else if (b == 1) ctx.promptOpen();
-                    else if (b == 2) TuiActions::handleFontSelection(doc);
-                    else if (b == 3) TuiActions::handleFontSizeSelection(doc);
-                    else if (b == 4) TuiActions::injectTagAroundSelection(doc, "<b>", "</b>");
-                    else if (b == 5) TuiActions::injectTagAroundSelection(doc, "<i>", "</i>");
+                    else if (b == 2) {
+                        if (!isMd) TuiActions::handleFontSelection(doc);
+                    }
+                    else if (b == 3) {
+                        if (!isMd) TuiActions::handleFontSizeSelection(doc);
+                    }
+                    else if (b == 4) TuiActions::applyBold(doc);
+                    else if (b == 5) TuiActions::applyItalic(doc);
                     return;
                 }
                 toolOffset += btnLen + 1;

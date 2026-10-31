@@ -42,6 +42,22 @@ void ActionManager::setFormatMenuVisible(bool visible) {
     }
 }
 
+void ActionManager::updateFormatMenuActions(bool isRich, bool isMarkdown) {
+    Q_UNUSED(isMarkdown);
+    if (!m_formatMenu) return;
+
+    QStringList typoActions = {
+        "Text Color...",
+        "Text Shading..."
+    };
+
+    for (const QString &key : typoActions) {
+        if (m_actionMap.contains(key)) {
+            m_actionMap[key]->setEnabled(isRich);
+        }
+    }
+}
+
 void ActionManager::setupMenus(QMenuBar *menuBar) {
     // --- File Menu ---
     QMenu *fileMenu = menuBar->addMenu(tr("&File"));

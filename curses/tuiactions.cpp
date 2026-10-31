@@ -14,6 +14,16 @@ namespace TuiActions {
 
 static std::string s_clipboard;
 
+bool isMarkdownDoc(const EditorDocument &doc) {
+    std::string ext = "";
+    size_t dot = doc.filePath.find_last_of('.');
+    if (dot != std::string::npos) {
+        ext = doc.filePath.substr(dot + 1);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    }
+    return (ext == "md");
+}
+
 static void writeToSystemClipboard(const std::string &text) {
     FILE *fp = popen("wl-copy 2>/dev/null", "w");
     if (!fp) fp = popen("xclip -selection clipboard 2>/dev/null", "w");
@@ -128,6 +138,18 @@ void injectTagAroundSelection(EditorDocument &doc, const std::string &openTag, c
     doc.modified = true;
 }
 
+void applyBold(EditorDocument &doc) {
+    injectTagAroundSelection(doc, "<b>", "</b>");
+}
+
+void applyItalic(EditorDocument &doc) {
+    injectTagAroundSelection(doc, "<i>", "</i>");
+}
+
+void applyUnderline(EditorDocument &doc) {
+    injectTagAroundSelection(doc, "<u>", "</u>");
+}
+
 void handleFontSelection(EditorDocument &doc) {
     std::vector<std::string> fonts = querySystemFonts();
     int sel = TuiDialogs::showListSelectionModal("Select Font Family", fonts);
@@ -172,6 +194,8 @@ void handleInsertTable(EditorDocument &doc) {
     int r = std::max(1, atoi(rowsStr.c_str()));
     int c = std::max(1, atoi(colsStr.c_str()));
 
+    doc.pushUndo();
+
     std::string table = "\n<table border=\"1\">\n";
     for (int i = 0; i < r; ++i) {
         table += "  <tr>";
@@ -182,10 +206,27 @@ void handleInsertTable(EditorDocument &doc) {
     }
     table += "</table>\n";
 
-    doc.pushUndo();
     auto &curLine = doc.lines[doc.cursor.line];
     curLine.insert(doc.cursor.col, table);
     doc.modified = true;
+}
+
+void handleInsertHorizontalRule(EditorDocument &doc) {
+    doc.pushUndo();
+    std::string tag = "<hr>";
+
+    if (doc.lines[doc.cursor.line].empty()) {
+        doc.lines[doc.cursor.line] = tag;
+    } else {
+        doc.lines.insert(doc.lines.begin() + doc.cursor.line + 1, tag);
+        doc.cursor.line++;
+    }
+    doc.cursor.col = static_cast<int>(tag.length());
+    doc.modified = true;
+}
+
+void handleInsertBlockquote(EditorDocument &doc) {
+    injectTagAroundSelection(doc, "<blockquote>", "</blockquote>");
 }
 
 void handleInsertBulletList(EditorDocument &doc) {

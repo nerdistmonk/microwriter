@@ -21,7 +21,8 @@
 
 static const std::vector<std::string> g_tuiStrictCodeExts = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
-    "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake"
+    "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt",
+    "md", "markdown"
 };
 
 class NcursesEditor {
@@ -244,7 +245,8 @@ private:
 
         static const std::vector<std::string> codeExts = {
             "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
-            "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt"
+            "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt",
+            "md", "markdown"
         };
         if (m_defaultCodeMode || std::find(codeExts.begin(), codeExts.end(), ext) != codeExts.end()) {
             d.mode = TuiMode::Code;
@@ -350,28 +352,12 @@ private:
                 finalOutput = TuiConverter::serializeLinesToHtml(doc().lines);
             }
         } else if (savingAsMd) {
-            bool bufferHasHtml = false;
-            for (const auto &l : doc().lines) {
-                if (l.find("<p") != std::string::npos || l.find("<table") != std::string::npos ||
-                    l.find("<h") != std::string::npos || l.find("<strong") != std::string::npos ||
-                    l.find("<b>") != std::string::npos || l.find("<em") != std::string::npos ||
-                    l.find("<i>") != std::string::npos || l.find("<code") != std::string::npos ||
-                    l.find("<hr") != std::string::npos || l.find("• ") != std::string::npos) {
-                    bufferHasHtml = true;
-                    break;
-                }
+            std::ostringstream ss;
+            for (size_t i = 0; i < doc().lines.size(); ++i) {
+                ss << doc().lines[i];
+                if (i + 1 < doc().lines.size()) ss << "\n";
             }
-
-            if (doc().mode == TuiMode::Code && !bufferHasHtml) {
-                std::ostringstream ss;
-                for (size_t i = 0; i < doc().lines.size(); ++i) {
-                    ss << doc().lines[i];
-                    if (i + 1 < doc().lines.size()) ss << "\n";
-                }
-                finalOutput = ss.str();
-            } else {
-                finalOutput = TuiConverter::serializeLinesToMarkdown(doc().lines);
-            }
+            finalOutput = ss.str();
         } else if (savingAsTxt) {
             if (stripFormatting) {
                 finalOutput = TuiConverter::serializeLinesToPlainText(doc().lines);
@@ -504,19 +490,14 @@ private:
             if (itemIdx == 0) TuiActions::handleFontSelection(doc());
             else if (itemIdx == 1) TuiActions::handleFontSizeSelection(doc());
             else if (itemIdx == 2) TuiActions::handleColorSelection(doc());
-            else if (itemIdx == 3) TuiActions::injectTagAroundSelection(doc(), "<b>", "</b>");
-            else if (itemIdx == 4) TuiActions::injectTagAroundSelection(doc(), "<i>", "</i>");
-            else if (itemIdx == 5) TuiActions::injectTagAroundSelection(doc(), "<u>", "</u>");
+            else if (itemIdx == 3) TuiActions::applyBold(doc());
+            else if (itemIdx == 4) TuiActions::applyItalic(doc());
+            else if (itemIdx == 5) TuiActions::applyUnderline(doc());
             else if (itemIdx == 6) TuiActions::handleInsertBulletList(doc());
             else if (itemIdx == 7) TuiActions::handleInsertNumberedList(doc());
-            else if (itemIdx == 8) TuiActions::injectTagAroundSelection(doc(), "<blockquote>", "</blockquote>");
+            else if (itemIdx == 8) TuiActions::handleInsertBlockquote(doc());
             else if (itemIdx == 9) TuiActions::handleInsertTable(doc());
-            else if (itemIdx == 10) {
-                doc().pushUndo();
-                doc().lines[doc().cursor.line].insert(doc().cursor.col, "<hr>");
-                doc().cursor.col += 4;
-                doc().modified = true;
-            }
+            else if (itemIdx == 10) TuiActions::handleInsertHorizontalRule(doc());
         } else if (menuIdx == 3) {
             if (itemIdx == 0) TuiActions::handleSpellCheck(doc());
             else if (itemIdx == 1) TuiActions::handleToggleComment(doc());

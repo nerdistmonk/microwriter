@@ -6,7 +6,7 @@
 
 A lightweight, distraction-free rich text editor and code notepad built with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with essential word processing tools, multi-tab editing, and versatile document export capabilities.
 
-<img src="shot.png" width="621" height="338" /> <img src="shot2.png" width="623" height="340" /> <img src="shot3.png" width="851" height="470" />
+![shot](shot.png) ![shot2](shot2.png) ![shot3](shot3.png)
 
 ---
 

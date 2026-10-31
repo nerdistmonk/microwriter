@@ -50,44 +50,14 @@ QString EditorView::getContentForSave() {
     QString content;
     QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
 
-    if (m_filePath.endsWith(".md", Qt::CaseInsensitive)) {
-        if (!document()->isModified() && !m_rawMarkdownSource.isEmpty()) {
-            return m_rawMarkdownSource;
-        }
-
-        content = toMarkdown();
-
-        for (QTextBlock blk = document()->begin(); blk.isValid(); blk = blk.next()) {
-            for (QTextBlock::iterator it = blk.begin(); !it.atEnd(); ++it) {
-                QTextFragment frag = it.fragment();
-                if (frag.isValid() && frag.charFormat().isImageFormat()) {
-                    QTextImageFormat ifmt = frag.charFormat().toImageFormat();
-                    QString rawName = ifmt.name();
-                    QString relPath = docDir.relativeFilePath(rawName);
-                    relPath.replace('\\', '/');
-
-                    QRegularExpression imgRe("!\\[.*?\\]\\(" + QRegularExpression::escape(rawName) + "\\)");
-                    QString replacement;
-                    if (ifmt.width() > 0 && ifmt.height() > 0) {
-                        replacement = QString("<img src=\"%1\" width=\"%2\" height=\"%3\" />")
-                                          .arg(relPath)
-                                          .arg((int)ifmt.width())
-                                          .arg((int)ifmt.height());
-                    } else {
-                        replacement = QString("![](%1)").arg(relPath);
-                    }
-                    content.replace(imgRe, replacement);
-                }
-            }
-        }
-
-        content.replace(QRegularExpression("(</img>|<img[^>]+/>)\\s*\\n\\s*(<img)"), "\\1 \\2");
-        m_rawMarkdownSource = content;
-        return content;
-    } else if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || m_filePath.endsWith(".htm", Qt::CaseInsensitive) || m_filePath.isEmpty()) {
+    if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || m_filePath.endsWith(".htm", Qt::CaseInsensitive) || m_filePath.isEmpty()) {
         content = toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
 
+        // Convert any Markdown image syntax left in text content: ![alt](url) -> <img src="url" alt="alt" />
+        content.replace(QRegularExpression(R"(!\[([^\]]*)\]\(([^)]+)\))"), R"(<img src="\2" alt="\1" />)");
+
+        // Restore relative image paths
         QRegularExpression imgTagRe("<img[^>]+src=\"([^\"]+)\"[^>]*>");
         QRegularExpressionMatchIterator iter = imgTagRe.globalMatch(content);
         QMap<QString, QString> replacements;
@@ -106,6 +76,19 @@ QString EditorView::getContentForSave() {
         for (auto it = replacements.constBegin(); it != replacements.constEnd(); ++it) {
             content.replace(QString("src=\"%1\"").arg(it.key()), QString("src=\"%1\"").arg(it.value()));
         }
+
+        // Strip default paragraph styles and default empty paragraphs
+        content.replace(QRegularExpression(R"(\s*style="[^"]*-qt-paragraph-type:\s*empty;[^"]*")"), "");
+        content.replace(QRegularExpression(R"(\s*style="\s*margin-top:\s*0px;\s*margin-bottom:\s*0px;\s*margin-left:\s*0px;\s*margin-right:\s*0px;\s*-qt-block-indent:\s*0;\s*text-indent:\s*0px;\s*")"), "");
+
+        QString defFamily = document()->defaultFont().family();
+        int defSize = document()->defaultFont().pointSize();
+        if (defSize <= 0) defSize = 10;
+        QString fontSpanPattern = QString(R"(<span\s+style="\s*font-family:'%1';\s*font-size:%2pt;\s*font-weight:\d+;\s*font-style:normal;\s*">([\s\S]*?)</span>)")
+            .arg(QRegularExpression::escape(defFamily))
+            .arg(defSize);
+        content.replace(QRegularExpression(fontSpanPattern), "\\1");
+        content.replace(QRegularExpression(R"(\s*style="\s*")"), "");
     } else {
         content = toPlainText();
     }
@@ -116,10 +99,7 @@ void EditorView::setContent(const QString &content, const QString &fileName) {
     m_filePath = fileName;
     m_rawMarkdownSource.clear();
 
-    if (fileName.endsWith(".md", Qt::CaseInsensitive)) {
-        m_rawMarkdownSource = content;
-        setMarkdown(content);
-    } else if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
+    if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
         setHtml(content);
     } else if (fileName.isEmpty()) {
         if (content.contains("<html", Qt::CaseInsensitive) || content.contains("<!DOCTYPE", Qt::CaseInsensitive) || content.contains("<p>", Qt::CaseInsensitive)) {

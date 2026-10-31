@@ -24,6 +24,7 @@ public:
     const QList<QAction*>& allMenuActions() const { return m_allMenuActions; }
     void syncLayoutModeAction(LayoutMode mode);
     void setFormatMenuVisible(bool visible);
+    void updateFormatMenuActions(bool isRich, bool isMarkdown = false);
 
 private:
     void registerAction(QAction *act);

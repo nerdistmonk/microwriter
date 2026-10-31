@@ -1,4 +1,5 @@
 #include "tuiview.h"
+#include "tuiactions.h"
 #include <curses.h>
 #include <sstream>
 #include <algorithm>
@@ -257,13 +258,23 @@ void render(
     clrtoeol();
 
     const auto &buttons = (doc.mode == TuiMode::RichText) ? toolbarButtons : codeButtons;
+    bool isMd = TuiActions::isMarkdownDoc(doc);
     int toolOffset = 1;
     for (size_t b = 0; b < buttons.size(); ++b) {
         bool isSave = (buttons[b] == "Save");
+        bool isTypo = (doc.mode == TuiMode::RichText && isMd && (buttons[b] == "Font" || buttons[b] == "Size"));
+        
         int pair = (isSave && saveFlash) ? 3 : 2;
-        attron(COLOR_PAIR(pair) | (saveFlash && isSave ? A_BOLD | A_REVERSE : 0));
+        chtype attr = COLOR_PAIR(pair);
+        if (isSave && saveFlash) {
+            attr |= A_BOLD | A_REVERSE;
+        } else if (isTypo) {
+            attr |= A_DIM;
+        }
+
+        attron(attr);
         mvprintw(contentTop, toolOffset, "[ %s ]", buttons[b].c_str());
-        attroff(COLOR_PAIR(pair) | (saveFlash && isSave ? A_BOLD | A_REVERSE : 0));
+        attroff(attr);
         toolOffset += static_cast<int>(buttons[b].length()) + 5;
     }
     contentTop++;

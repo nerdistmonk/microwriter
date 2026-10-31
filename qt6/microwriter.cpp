@@ -34,12 +34,14 @@
 
 static const QSet<QString> g_codeExtensions = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json",
-    "css", "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt"
+    "css", "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt",
+    "md", "markdown"
 };
 
 static const QSet<QString> g_strictCodeLockExtensions = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json",
-    "css", "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake"
+    "css", "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake",
+    "md", "markdown"
 };
 
 MicroWriter::MicroWriter(QWidget *parent)
@@ -80,9 +82,6 @@ MicroWriter::MicroWriter(QWidget *parent)
         bool isRich = base->supportsRichFormatting();
         switchToolbarProfile(!isRich);
 
-        if (fontCombo) fontCombo->setEnabled(isRich);
-        if (sizeSpin) sizeSpin->setEnabled(isRich);
-
         if (isRich) {
             EditorView *ed = dynamic_cast<EditorView*>(base);
             LayoutMode targetMode = ed->layoutMode();
@@ -98,11 +97,14 @@ MicroWriter::MicroWriter(QWidget *parent)
         } else {
             currentLayoutMode = CodeLayout;
             ruler->setVisible(false);
+            if (fontCombo) fontCombo->setEnabled(false);
+            if (sizeSpin) sizeSpin->setEnabled(false);
         }
 
         if (actionManager) {
             actionManager->syncLayoutModeAction(currentLayoutMode);
             actionManager->setFormatMenuVisible(isRich);
+            actionManager->updateFormatMenuActions(isRich, false);
         }
     });
 
@@ -207,6 +209,7 @@ void MicroWriter::openFilePath(const QString &fileName) {
     if (actionManager) {
         actionManager->syncLayoutModeAction(targetMode);
         actionManager->setFormatMenuVisible(targetMode != CodeLayout);
+        actionManager->updateFormatMenuActions(targetMode != CodeLayout, false);
     }
 
     BaseEditor *newBase = nullptr;
@@ -301,6 +304,7 @@ void MicroWriter::newFile(const QString &title) {
 
     if (actionManager) {
         actionManager->setFormatMenuVisible(currentLayoutMode != CodeLayout);
+        actionManager->updateFormatMenuActions(currentLayoutMode != CodeLayout, false);
     }
 }
 
@@ -310,8 +314,8 @@ void MicroWriter::openFile() {
         "Open Document",
         "",
         "Supported Files (*.html *.htm *.md *.txt *.cpp *.c *.h *.hpp *.py *.js *.json *.css *.xml *.ini *.cfg *.conf *.sh);;"
-        "Documents (*.html *.htm *.md);;"
-        "Source Code (*.cpp *.c *.h *.hpp *.cc *.cxx *.py *.js *.ts *.json *.css *.xml *.sh *.bash *.ini *.cfg *.conf *.yaml *.yml *.cmake *.txt);;"
+        "Documents (*.html *.htm);;"
+        "Source Code & Markdown (*.cpp *.c *.h *.hpp *.cc *.cxx *.py *.js *.ts *.json *.css *.xml *.sh *.bash *.ini *.cfg *.conf *.yaml *.yml *.cmake *.txt *.md);;"
         "All Files (*.*)",
         nullptr,
         QFileDialog::DontUseNativeDialog
@@ -337,13 +341,13 @@ void MicroWriter::saveAsFile() {
     dialog.setAcceptMode(QFileDialog::AcceptSave);
     dialog.setNameFilters({
         "HTML Files (*.html *.htm)",
-        "Markdown (*.md)",
         "Text Files (*.txt)",
+        "Markdown (*.md)",
         "C/C++ Source (*.cpp *.c *.h *.hpp)",
         "All Files (*.*)"
     });
 
-    QCheckBox *stripBox = new QCheckBox(tr("Strip Markdown/HTML formatting"), &dialog);
+    QCheckBox *stripBox = new QCheckBox(tr("Strip HTML formatting"), &dialog);
     stripBox->setChecked(false);
 
     auto updateStripBox = [stripBox, &dialog]() {
@@ -373,46 +377,18 @@ void MicroWriter::saveAsFile() {
             else fileName += ".html";
         }
 
-        QString oldExt = QFileInfo(editor->filePath()).suffix().toLower();
         QString newExt = QFileInfo(fileName).suffix().toLower();
 
-        // If saving from CodeEditorView into a different format
         if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
             QString bufferText = codeEd->getRawPlainText();
-            if ((newExt == "html" || newExt == "htm") && (oldExt == "md" || !bufferText.contains("<html", Qt::CaseInsensitive))) {
+            if (newExt == "txt" && doStrip) {
                 QTextDocument tempDoc;
-                tempDoc.setMarkdown(bufferText);
-                QString htmlOutput = tempDoc.toHtml();
-                htmlOutput.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
-                
-                editor->setFilePath(fileName);
-                writeFile(fileName, htmlOutput);
-                codeEd->setContent(htmlOutput, fileName);
-                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
-                updateWindowTitleAndStats();
-                return;
-            } else if (newExt == "md" && (oldExt == "html" || oldExt == "htm" || bufferText.contains("<html", Qt::CaseInsensitive))) {
-                QTextDocument tempDoc;
-                tempDoc.setHtml(bufferText);
-                QString mdOutput = tempDoc.toMarkdown();
-                
-                editor->setFilePath(fileName);
-                writeFile(fileName, mdOutput);
-                codeEd->setContent(mdOutput, fileName);
-                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
-                updateWindowTitleAndStats();
-                return;
-            } else if (newExt == "txt") {
-                QString txtOutput = bufferText;
-                if (doStrip) {
-                    QTextDocument tempDoc;
-                    if (bufferText.contains("<html", Qt::CaseInsensitive) || bufferText.contains("<!DOCTYPE", Qt::CaseInsensitive) || bufferText.contains("<p>", Qt::CaseInsensitive)) {
-                        tempDoc.setHtml(bufferText);
-                    } else {
-                        tempDoc.setMarkdown(bufferText);
-                    }
-                    txtOutput = tempDoc.toPlainText();
+                if (bufferText.contains("<html", Qt::CaseInsensitive) || bufferText.contains("<!DOCTYPE", Qt::CaseInsensitive) || bufferText.contains("<p>", Qt::CaseInsensitive)) {
+                    tempDoc.setHtml(bufferText);
+                } else {
+                    tempDoc.setPlainText(bufferText);
                 }
+                QString txtOutput = tempDoc.toPlainText();
                 editor->setFilePath(fileName);
                 writeFile(fileName, txtOutput);
                 codeEd->setContent(txtOutput, fileName);
@@ -420,6 +396,13 @@ void MicroWriter::saveAsFile() {
                 updateWindowTitleAndStats();
                 return;
             }
+
+            editor->setFilePath(fileName);
+            writeFile(fileName, bufferText);
+            codeEd->setContent(bufferText, fileName);
+            tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
+            updateWindowTitleAndStats();
+            return;
         }
 
         if (newExt == "txt") {
@@ -428,13 +411,7 @@ void MicroWriter::saveAsFile() {
                 output = editor->getRawPlainText();
             } else {
                 EditorView *richEd = dynamic_cast<EditorView*>(editor);
-                if (richEd && !richEd->rawMarkdownSource().isEmpty()) {
-                    output = richEd->rawMarkdownSource();
-                } else if (richEd) {
-                    output = richEd->toHtml();
-                } else {
-                    output = editor->getContentForSave();
-                }
+                output = richEd ? richEd->toHtml() : editor->getContentForSave();
             }
             editor->setFilePath(fileName);
             writeFile(fileName, output);
@@ -447,6 +424,10 @@ void MicroWriter::saveAsFile() {
         writeFile(fileName);
         tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
         updateWindowTitleAndStats();
+
+        if (fontCombo) fontCombo->setEnabled(true);
+        if (sizeSpin) sizeSpin->setEnabled(true);
+        if (actionManager) actionManager->updateFormatMenuActions(true, false);
     }
 }
 
@@ -520,7 +501,6 @@ void MicroWriter::setLayoutMode(LayoutMode mode) {
     BaseEditor *curBase = currentBaseEditor();
     if (!curBase) return;
 
-    // Lock-out guard: Prevent source code and configuration files from ever switching out of CodeLayout
     QString ext = QFileInfo(curBase->filePath()).suffix().toLower();
     if (g_strictCodeLockExtensions.contains(ext) && mode != CodeLayout) {
         if (actionManager) {
@@ -535,6 +515,7 @@ void MicroWriter::setLayoutMode(LayoutMode mode) {
     if (actionManager) {
         actionManager->syncLayoutModeAction(mode);
         actionManager->setFormatMenuVisible(mode != CodeLayout);
+        actionManager->updateFormatMenuActions(mode != CodeLayout, false);
     }
 
     if (mode == CodeLayout) {
@@ -545,15 +526,8 @@ void MicroWriter::setLayoutMode(LayoutMode mode) {
 
             if (fPath.endsWith(".html", Qt::CaseInsensitive) || fPath.endsWith(".htm", Qt::CaseInsensitive)) {
                 rawContent = richEd ? richEd->toHtml() : curBase->getContentForSave();
-            } else if (fPath.endsWith(".md", Qt::CaseInsensitive)) {
-                if (richEd && !richEd->rawMarkdownSource().isEmpty() && !richEd->isModified()) {
-                    rawContent = richEd->rawMarkdownSource();
-                } else {
-                    rawContent = richEd ? richEd->toMarkdown() : curBase->getContentForSave();
-                }
             } else {
-                // Default to HTML source view so rich formatting is preserved
-                rawContent = richEd ? richEd->toHtml() : curBase->getContentForSave();
+                rawContent = richEd ? richEd->toPlainText() : curBase->getContentForSave();
             }
 
             QString enc = curBase->encodingName();
@@ -724,11 +698,13 @@ void MicroWriter::updateFormatToolbarState() {
     if (!base || !base->supportsRichFormatting()) {
         if (fontCombo) fontCombo->setEnabled(false);
         if (sizeSpin) sizeSpin->setEnabled(false);
+        if (actionManager) actionManager->updateFormatMenuActions(false, false);
         return;
     }
 
     if (fontCombo) fontCombo->setEnabled(true);
     if (sizeSpin) sizeSpin->setEnabled(true);
+    if (actionManager) actionManager->updateFormatMenuActions(true, false);
 
     EditorView *ed = dynamic_cast<EditorView*>(base);
     if (!ed) return;
