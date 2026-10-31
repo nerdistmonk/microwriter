@@ -1,0 +1,8 @@
+Version 3.1 Todo List:
+
+Add support for either saving/loading zip files or encoding the fonts into the html
+Add support for microcalc spreadsheet files (mc)
+Add support for ciphers/encoding/password protected zips
+Add support for running a command so it's output pipes into the buffer
+Mitigate fonts not being available on another system.
+Do further modularization of the codebase for QT6.

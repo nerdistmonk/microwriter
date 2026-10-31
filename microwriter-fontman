@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+    echo "Usage:"
+    echo "  $0 <html-file>               Scan HTML/CSS and extract matching system fonts"
+    echo "  $0 -i [source-folder]        Install fonts from a folder into ~/.local/share/fonts"
+    exit 1
+}
+
+# Handle Installation Mode (-i)
+if [ "${1:-}" = "-i" ]; then
+    SRC_DIR="${2:-.}"
+    if [ ! -d "$SRC_DIR" ]; then
+        echo "Error: Directory '$SRC_DIR' not found."
+        exit 1
+    fi
+
+    TARGET_DIR="$HOME/.local/share/fonts"
+    mkdir -p "$TARGET_DIR"
+
+    echo "[*] Installing fonts from '$SRC_DIR' to '$TARGET_DIR'..."
+    copied=0
+
+    while IFS= read -r -d '' file; do
+        filename=$(basename "$file")
+        cp -n "$file" "$TARGET_DIR/"
+        echo "  [+] Installed: $filename"
+        copied=$((copied + 1))
+    done < <(find "$SRC_DIR" -type f \( -name "*.ttf" -o -name "*.otf" -o -name "*.woff" -o -name "*.woff2" \) -print0 2>/dev/null)
+
+    if [ "$copied" -gt 0 ]; then
+        echo "[*] Updating font cache (fc-cache)..."
+        fc-cache -f "$TARGET_DIR" 2>/dev/null || true
+    fi
+
+    echo "[*] Done! Successfully installed $copied font(s)."
+    exit 0
+fi
+
+# Handle Scanning Mode (HTML file argument)
+HTML_FILE="${1:-}"
+if [ -z "$HTML_FILE" ] || [ ! -f "$HTML_FILE" ]; then
+    usage
+fi
+
+TARGET_DIR="./fonts"
+mkdir -p "$TARGET_DIR"
+
+echo "[*] Scanning '$HTML_FILE' for font-family names..."
+
+TEMP_FAMILIES=$(mktemp)
+trap 'rm -f "$TEMP_FAMILIES"' EXIT
+
+grep -oE 'font-family\s*:\s*[^;]+' "$HTML_FILE" 2>/dev/null | while read -r match; do
+    family=$(echo "$match" | cut -d':' -f2 | tr -d '"'\'' ' | cut -d',' -f1)
+    [ -n "$family" ] && echo "$family" >> "$TEMP_FAMILIES"
+done
+
+sort -u "$TEMP_FAMILIES" -o "$TEMP_FAMILIES"
+
+if [ ! -s "$TEMP_FAMILIES" ]; then
+    echo "[-] No font-family references found."
+    exit 0
+fi
+
+echo "[*] Querying system via Fontconfig (fc-list)..."
+copied=0
+
+while read -r family; do
+    [ -z "$family" ] && continue
+    
+    while IFS= read -r font_path; do
+        if [ -f "$font_path" ]; then
+            cp -n "$font_path" "$TARGET_DIR/"
+            echo "  [+] Copied: $(basename "$font_path") (matched family: $family)"
+            copied=$((copied + 1))
+        fi
+    done < <(fc-list :family 2>/dev/null | grep -i "$family" | cut -d: -f1 | sort -u)
+
+done < "$TEMP_FAMILIES"
+
+echo "[*] Done! Copied $copied font(s) to $TARGET_DIR/"
