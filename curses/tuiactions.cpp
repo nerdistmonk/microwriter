@@ -300,6 +300,23 @@ void handleInsertNumberedList(EditorDocument &doc) {
     doc.modified = true;
 }
 
+void handleInsertImage(EditorDocument &doc) {
+    std::string imgPath = TuiDialogs::showPromptModal("Enter image file path/name: ");
+    if (imgPath.empty()) return;
+
+    // Extract a basic filename for the alt text
+    size_t lastSlash = imgPath.find_last_of("/\\");
+    std::string altText = (lastSlash == std::string::npos) ? imgPath : imgPath.substr(lastSlash + 1);
+
+    doc.pushUndo();
+    std::string tag = "<img src=\"" + imgPath + "\" alt=\"" + altText + "\" />";
+
+    auto &curLine = doc.lines[doc.cursor.line];
+    curLine.insert(doc.cursor.col, tag);
+    doc.cursor.col += static_cast<int>(tag.length());
+    doc.modified = true;
+}
+
 void handleDeleteSelection(EditorDocument &doc) {
     if (!doc.hasSelection) return;
 
@@ -817,6 +834,29 @@ void handleStripBlankLines(EditorDocument &doc) {
     doc.cursor.line = std::min(doc.cursor.line, static_cast<int>(doc.lines.size()) - 1);
     doc.cursor.col = std::min(doc.cursor.col, static_cast<int>(doc.lines[doc.cursor.line].length()));
     doc.modified = true;
+}
+
+void handleStripTrailingSpaces(EditorDocument &doc) {
+    doc.pushUndo();
+    bool changed = false;
+
+    for (auto &l : doc.lines) {
+        size_t endPos = l.find_last_not_of(" \t");
+        if (endPos == std::string::npos) {
+            if (!l.empty()) {
+                l.clear();
+                changed = true;
+            }
+        } else if (endPos + 1 < l.length()) {
+            l.erase(endPos + 1);
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        doc.cursor.col = std::min(doc.cursor.col, static_cast<int>(doc.lines[doc.cursor.line].length()));
+        doc.modified = true;
+    }
 }
 
 void handleSortLines(EditorDocument &doc) {

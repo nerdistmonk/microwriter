@@ -54,6 +54,7 @@ public:
         init_pair(4, COLOR_CYAN, -1);
         init_pair(5, COLOR_BLACK, COLOR_WHITE);
         init_pair(6, COLOR_WHITE, COLOR_BLACK);
+        init_pair(7, COLOR_WHITE, COLOR_RED);
 
         if (initialFiles.empty()) {
             EditorDocument d;
@@ -123,8 +124,8 @@ private:
             "Wrap: Off", "Wrap: Soft", "Wrap: Hard", "Exit"
         },
         {"Undo", "Redo", "Cut", "Copy", "Paste", "Duplicate Line/Block", "Find & Replace"},
-        {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line"},
-        {"Spell Check (Aspell)", "Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase"},
+        {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line", "Insert Image"},
+        {"Spell Check (Aspell)", "Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase", "Strip Trailing Spaces"},
         {"About MicroWriter TUI", "Regex Cheat Sheet", "HTML Quick Reference", "Sed & Utilities Cheat Sheet", "Useful Bash Scripts"}
     };
 
@@ -498,6 +499,7 @@ private:
             else if (itemIdx == 8) TuiActions::handleInsertBlockquote(doc());
             else if (itemIdx == 9) TuiActions::handleInsertTable(doc());
             else if (itemIdx == 10) TuiActions::handleInsertHorizontalRule(doc());
+            else if (itemIdx == 11) TuiActions::handleInsertImage(doc());
         } else if (menuIdx == 3) {
             if (itemIdx == 0) TuiActions::handleSpellCheck(doc());
             else if (itemIdx == 1) TuiActions::handleToggleComment(doc());
@@ -510,6 +512,7 @@ private:
             else if (itemIdx == 8) TuiActions::handleReverseLines(doc());
             else if (itemIdx == 9) TuiActions::handleChangeCase(doc(), true);
             else if (itemIdx == 10) TuiActions::handleChangeCase(doc(), false);
+            else if (itemIdx == 11) TuiActions::handleStripTrailingSpaces(doc());
         } else if (menuIdx == 4) {
             if (itemIdx == 0) {
                 TuiDialogs::showAboutModal();

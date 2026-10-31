@@ -113,7 +113,8 @@ static void highlightCodeLine(
     int colOffset,
     int logicalLine,
     const std::function<bool(int, int)> &isSelected,
-    int initialBracketDepth
+    int initialBracketDepth,
+    int lastNonSpace
 ) {
     static const std::unordered_set<std::string> keywords = {
         "char", "class", "const", "double", "enum", "explicit", "friend", "inline",
@@ -131,6 +132,16 @@ static void highlightCodeLine(
     size_t i = 0;
 
     while (i < line.length() && startX + static_cast<int>(i) < COLS) {
+        bool isTrailing = (colOffset + static_cast<int>(i) > lastNonSpace || lastNonSpace == std::string::npos) && 
+                          (line[i] == ' ' || line[i] == '\t');
+
+        if (isTrailing) {
+            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
+            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(7));
+            i++;
+            continue;
+        }
+
         if (i + 1 < line.length() && line[i] == '/' && line[i + 1] == '/') {
             for (size_t k = i; k < line.length() && startX + static_cast<int>(k) < COLS; ++k) {
                 bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
@@ -365,6 +376,8 @@ void render(
             continue;
         }
 
+        int lastNonSpace = doc.lines[logicalLine].find_last_not_of(" \t");
+
         if (doc.mode == TuiMode::Code) {
             attron(COLOR_PAIR(3));
             if (!useWrap) {
@@ -384,15 +397,20 @@ void render(
         }
 
         if (doc.mode == TuiMode::Code) {
-            highlightCodeLine(screenY, lineNumWidth, displayText, colOffset, logicalLine, isSelected, runningDepth);
+            highlightCodeLine(screenY, lineNumWidth, displayText, colOffset, logicalLine, isSelected, runningDepth, lastNonSpace);
             for (char c : displayText) {
                 if (c == '(' || c == '{' || c == '[') runningDepth++;
                 else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
             }
         } else {
             for (int x = 0; x < static_cast<int>(displayText.length()) && x + lineNumWidth < COLS; ++x) {
-                bool sel = isSelected(logicalLine, colOffset + x);
-                printCharWithSelection(screenY, lineNumWidth + x, displayText[x], sel, 0);
+                int absCol = colOffset + x;
+                bool isTrailing = (absCol > lastNonSpace || lastNonSpace == std::string::npos) && 
+                                  (displayText[x] == ' ' || displayText[x] == '\t');
+                bool sel = isSelected(logicalLine, absCol);
+
+                chtype attr = isTrailing ? COLOR_PAIR(7) : 0;
+                printCharWithSelection(screenY, lineNumWidth + x, displayText[x], sel, attr);
             }
         }
     }
