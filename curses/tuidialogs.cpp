@@ -914,6 +914,40 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
     return -1;
 }
 
+int showMarkdownCheatSheetModal(std::string &outSyntax) {
+    struct MarkdownItem {
+        std::string desc;
+        std::string syntax;
+    };
+    static const std::vector<MarkdownItem> snippets = {
+        {"Heading 1", "# Heading 1"},
+        {"Heading 2", "## Heading 2"},
+        {"Heading 3", "### Heading 3"},
+        {"Bold text", "**bold text**"},
+        {"Italic text", "*italic text*"},
+        {"Bullet List", "- Item 1\n- Item 2"},
+        {"Numbered List", "1. Item 1\n2. Item 2"},
+        {"Blockquote", "> Quote text"},
+        {"Inline Code", "`code`"},
+        {"Code Block", "```cpp\n// code here\n```"},
+        {"Anchor / Link", "[Link Text](https://example.com)"},
+        {"Image element", "![Alt text](image.jpg)"},
+        {"Horizontal Rule", "---"}
+    };
+
+    std::vector<std::string> displayList;
+    for (const auto &s : snippets) {
+        displayList.push_back(s.desc + " -> " + s.syntax);
+    }
+
+    int sel = showListSelectionModal("Markdown Quick Reference (Enter to Insert)", displayList);
+    if (sel >= 0 && sel < static_cast<int>(snippets.size())) {
+        outSyntax = snippets[sel].syntax;
+        return sel;
+    }
+    return -1;
+}
+
 int showTabContextMenuModal(const std::string &tabTitle) {
     std::vector<std::string> options = {
         "Save File",

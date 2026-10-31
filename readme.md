@@ -2,7 +2,7 @@
 
 **The diet soda of word processors, same refreshing taste, half the calories!**
 
-**Version 2.7, released on October 28th, 2026**
+**Version 3.0, released on October 31st, 2026**
 
 A lightweight, distraction-free rich text editor and code notepad built with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with essential word processing tools, multi-tab editing, and versatile document export capabilities.
 
@@ -14,7 +14,7 @@ A lightweight, distraction-free rich text editor and code notepad built with C++
 
 - **Multi-Tab Interface:** Work on multiple documents simultaneously with per-tab layout memory.
 - **Rich Text Formatting:** Bold, italic, underline, strikethrough, text color, highlight color, font family, and font size.
-- **Four Layout Modes:** Switch seamlessly between Normal, Web, Print, and Code Layout modes.
+- **Three Layout Modes:** Switch seamlessly between Normal, Print, and Code Layout modes.
 - **Dedicated Code Mode:** Clean code editor with line numbering, bracket matching, syntax highlighting, and auto-detection for common source files.
 - **Safety Lockout:** Prevents a user from accidentally switching to rich text edit mode while working on source files.
 - **Context-Aware Menus:** The Format menu automatically hides while working in Code Layout to keep the workspace clean and focused.
@@ -23,7 +23,7 @@ A lightweight, distraction-free rich text editor and code notepad built with C++
 - **Document Ruler:** Visual interactive ruler for margins and tabs.
 - **Live Statistics:** Real-time character count, word count, line/column tracking, encoding display, and newline mode detection (CRLF, LF, CR).
 - **Dark Mode Support:** Clean light and dark theme toggling.
-- **Multi-Format Support:** Open and save Markdown (`.md`), HTML (`.html`), plain text (`.txt`), and source code files, plus export to PDF and ODT.
+- **Multi-Format Support:** Supports HTML as it's primary format. It can convert markdown to html when saved as HTML. All other formats are opened directly into Code Layout mode.
 
 ---
 
@@ -59,9 +59,8 @@ A lightweight, distraction-free rich text editor and code notepad built with C++
 | Shortcut | Action |
 | :--- | :--- |
 | `Ctrl + 1` | **Normal Layout** |
-| `Ctrl + 2` | **Web Layout** |
-| `Ctrl + 3` | **Print Layout** |
-| `Ctrl + 4` | **Code Layout** |
+| `Ctrl + 2` | **Print Layout** |
+| `Ctrl + 3` | **Code Layout** |
 
 ### Text Formatting (Rich Text Modes)
 

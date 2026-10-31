@@ -122,7 +122,7 @@ void BracketHighlighter::setupRules() {
 
     // 9. Trailing whitespace only
     QTextCharFormat trailingWhitespaceFormat;
-    trailingWhitespaceFormat.setBackground(m_darkMode ? QColor(100, 30, 30, 180) : QColor(255, 180, 180));
+    trailingWhitespaceFormat.setBackground(m_darkMode ? QColor(204, 34, 34) : QColor(255, 77, 77));
     rule.pattern = QRegularExpression(QStringLiteral("[ \\t]+$"));
     rule.format = trailingWhitespaceFormat;
     m_highlightingRules.append(rule);

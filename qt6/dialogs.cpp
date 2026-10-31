@@ -556,6 +556,63 @@ void BashHelpDialog::applySelected() {
     accept();
 }
 
+// MarkdownHelpDialog
+MarkdownHelpDialog::MarkdownHelpDialog(BaseEditor *ed, QWidget *parent) : QDialog(parent), editor(ed) {
+    setWindowTitle("Markdown Quick Reference");
+    resize(500, 360);
+
+    QVBoxLayout *layout = new QVBoxLayout(this);
+    layout->addWidget(new QLabel("Double-click an item to insert it into the current document:", this));
+
+    tableWidget = new QTableWidget(this);
+    tableWidget->setColumnCount(2);
+    tableWidget->setHorizontalHeaderLabels({"Description", "Markdown Syntax"});
+    tableWidget->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    tableWidget->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    tableWidget->setSelectionBehavior(QAbstractItemView::SelectRows);
+    tableWidget->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    struct MarkdownSnippet { QString desc; QString syntax; };
+    QList<MarkdownSnippet> snippets = {
+        {"Heading 1", "# Heading 1"},
+        {"Heading 2", "## Heading 2"},
+        {"Heading 3", "### Heading 3"},
+        {"Bold text", "**bold text**"},
+        {"Italic text", "*italic text*"},
+        {"Bullet List", "- Item 1\n- Item 2"},
+        {"Numbered List", "1. Item 1\n2. Item 2"},
+        {"Blockquote", "> Quote text"},
+        {"Inline Code", "`code`"},
+        {"Code Block", "```cpp\n// code here\n```"},
+        {"Anchor / Link", "[Link Text](https://example.com)"},
+        {"Image element", "![Alt text](image.jpg)"},
+        {"Horizontal Rule", "---"}
+    };
+
+    tableWidget->setRowCount(snippets.size());
+    for (int i = 0; i < snippets.size(); ++i) {
+        tableWidget->setItem(i, 0, new QTableWidgetItem(snippets[i].desc));
+        tableWidget->setItem(i, 1, new QTableWidgetItem(snippets[i].syntax));
+    }
+    layout->addWidget(tableWidget);
+
+    QPushButton *insBtn = new QPushButton("Insert Syntax", this);
+    connect(insBtn, &QPushButton::clicked, this, &MarkdownHelpDialog::applySelected);
+    connect(tableWidget, &QTableWidget::cellDoubleClicked, this, [this](int, int){ applySelected(); });
+    layout->addWidget(insBtn);
+}
+
+void MarkdownHelpDialog::applySelected() {
+    int row = tableWidget->currentRow();
+    if (row < 0 || !editor) return;
+
+    QString syntax = tableWidget->item(row, 1)->text();
+    QTextCursor c = editor->textCursor();
+    c.insertText(syntax);
+    editor->setTextCursor(c);
+    accept();
+}
+
 // ToolbarCustomizeDialog
 ToolbarCustomizeDialog::ToolbarCustomizeDialog(QToolBar *targetToolbar, const QList<QAction*> &allActions, QWidget *parent)
     : QDialog(parent), toolbar(targetToolbar), availableActions(allActions)

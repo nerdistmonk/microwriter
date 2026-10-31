@@ -28,6 +28,7 @@ void addSuffix(BaseEditor *editor, const QString &suffix);
 
 void tabsToSpaces(BaseEditor *editor);
 void spacesToTabs(BaseEditor *editor);
+void removeTrailingSpaces(BaseEditor *editor);
 
 } // namespace TextTools
 

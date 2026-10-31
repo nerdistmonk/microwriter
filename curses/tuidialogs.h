@@ -17,6 +17,7 @@ int showRegexCheatSheetModal(std::string &outFind, std::string &outReplace);
 int showHtmlCheatSheetModal(std::string &outTag);
 int showSedUtilsCheatSheetModal(std::string &outSnippet);
 int showBashScriptCheatSheetModal(std::string &outScript);
+int showMarkdownCheatSheetModal(std::string &outSyntax);
 int showTabContextMenuModal(const std::string &tabTitle); // returns 0: cancel, 1: save, 2: close, 3: save & close
 }
 

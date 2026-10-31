@@ -126,7 +126,7 @@ private:
         {"Undo", "Redo", "Cut", "Copy", "Paste", "Duplicate Line/Block", "Find & Replace"},
         {"Select Font", "Font Size", "Text Color", "Bold", "Italic", "Underline", "Bullet List", "Numbered List", "Blockquote", "Insert Table", "Horizontal Line", "Insert Image"},
         {"Spell Check (Aspell)", "Toggle Comment //", "Move Line Up", "Move Line Down", "Indent", "Unindent", "Strip Blank Lines", "Sort Lines", "Reverse Lines", "To Uppercase", "To Lowercase", "Strip Trailing Spaces"},
-        {"About MicroWriter TUI", "Regex Cheat Sheet", "HTML Quick Reference", "Sed & Utilities Cheat Sheet", "Useful Bash Scripts"}
+        {"About MicroWriter TUI", "Markdown Cheat Sheet", "Regex Cheat Sheet", "HTML Quick Reference", "Sed & Utilities Cheat Sheet", "Useful Bash Scripts"}
     };
 
     EditorDocument& doc() { return m_documents[m_activeDocIdx]; }
@@ -532,11 +532,35 @@ private:
             if (itemIdx == 0) {
                 TuiDialogs::showAboutModal();
             } else if (itemIdx == 1) {
+                std::string syntax;
+                if (TuiDialogs::showMarkdownCheatSheetModal(syntax) >= 0) {
+                    doc().pushUndo();
+                    std::stringstream ss(syntax);
+                    std::string line;
+                    std::vector<std::string> newLines;
+                    while (std::getline(ss, line)) newLines.push_back(line);
+
+                    if (!newLines.empty()) {
+                        std::string cur = doc().lines[doc().cursor.line];
+                        std::string prefix = cur.substr(0, doc().cursor.col);
+                        std::string suffix = cur.substr(doc().cursor.col);
+
+                        doc().lines[doc().cursor.line] = prefix + newLines[0];
+                        for (size_t i = 1; i < newLines.size(); ++i) {
+                            doc().lines.insert(doc().lines.begin() + doc().cursor.line + i, newLines[i]);
+                        }
+                        doc().cursor.line += static_cast<int>(newLines.size() - 1);
+                        doc().lines[doc().cursor.line] += suffix;
+                        doc().cursor.col = static_cast<int>(newLines.back().length());
+                        doc().modified = true;
+                    }
+                }
+            } else if (itemIdx == 2) {
                 std::string findP, repP;
                 if (TuiDialogs::showRegexCheatSheetModal(findP, repP) >= 0) {
                     TuiActions::handleFindReplace(doc(), findP, repP);
                 }
-            } else if (itemIdx == 2) {
+            } else if (itemIdx == 3) {
                 std::string tag;
                 if (TuiDialogs::showHtmlCheatSheetModal(tag) >= 0) {
                     doc().pushUndo();
@@ -544,7 +568,7 @@ private:
                     doc().cursor.col += static_cast<int>(tag.length());
                     doc().modified = true;
                 }
-            } else if (itemIdx == 3) {
+            } else if (itemIdx == 4) {
                 std::string cmd;
                 if (TuiDialogs::showSedUtilsCheatSheetModal(cmd) >= 0) {
                     doc().pushUndo();
@@ -552,7 +576,7 @@ private:
                     doc().cursor.col += static_cast<int>(cmd.length());
                     doc().modified = true;
                 }
-            } else if (itemIdx == 4) {
+            } else if (itemIdx == 5) {
                 std::string script;
                 if (TuiDialogs::showBashScriptCheatSheetModal(script) >= 0) {
                     doc().pushUndo();

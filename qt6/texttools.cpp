@@ -230,6 +230,37 @@ void stripBlankLines(BaseEditor *editor) {
     applyCursorBack(editor, cursor);
 }
 
+void removeTrailingSpaces(BaseEditor *editor) {
+    QTextDocument *doc = nullptr;
+    QTextCursor cursor;
+    if (!getEditorState(editor, doc, cursor)) return;
+
+    int startBlockNum, endBlockNum;
+    getBlockRange(doc, cursor, startBlockNum, endBlockNum);
+
+    cursor.beginEditBlock();
+    for (int i = startBlockNum; i <= endBlockNum; ++i) {
+        QTextBlock blk = doc->findBlockByNumber(i);
+        if (!blk.isValid()) continue;
+
+        QString text = blk.text();
+        int originalLength = text.length();
+        int endIndex = originalLength;
+        while (endIndex > 0 && (text.at(endIndex - 1) == ' ' || text.at(endIndex - 1) == '\t')) {
+            endIndex--;
+        }
+
+        if (endIndex < originalLength) {
+            QTextCursor c(blk);
+            c.setPosition(blk.position() + endIndex);
+            c.setPosition(blk.position() + originalLength, QTextCursor::KeepAnchor);
+            c.removeSelectedText();
+        }
+    }
+    cursor.endEditBlock();
+    applyCursorBack(editor, cursor);
+}
+
 void sortLines(BaseEditor *editor) {
     reorderBlocks(editor, [](QList<LineBlockData> &lines) {
         std::sort(lines.begin(), lines.end(), [](const LineBlockData &a, const LineBlockData &b) {

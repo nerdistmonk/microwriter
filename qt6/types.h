@@ -5,7 +5,6 @@
 
 enum LayoutMode {
     NormalLayout,
-    WebLayout,
     PrintLayout,
     CodeLayout
 };

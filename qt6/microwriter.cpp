@@ -495,7 +495,7 @@ void MicroWriter::saveAsFile() {
 
         if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
             QString bufferText = codeEd->getRawPlainText();
-            
+
             if (newExt == "html" || newExt == "htm") {
                 bufferText = markdownToHtml(bufferText);
             } else if (newExt == "txt" && doStrip) {
@@ -736,19 +736,6 @@ void MicroWriter::applyLayoutModeToEditor(EditorView *editor, LayoutMode mode) {
         frameFmt.setBottomMargin(15);
         frameFmt.setRightMargin(editor->rightMarginPixels() > 0 ? editor->rightMarginPixels() : 20);
         frameFmt.setLeftMargin(editor->leftMarginPixels());
-        doc->rootFrame()->setFrameFormat(frameFmt);
-        doc->setPageSize(QSizeF(-1, -1));
-        doc->setTextWidth(editor->viewport()->width());
-        break;
-
-    case WebLayout:
-        editor->isPrintLayout = false;
-        ruler->setVisible(false);
-        editor->setStyleSheet(QString("EditorView { background-color: %1; color: %2; }").arg(bg, textCol));
-        frameFmt.setTopMargin(30);
-        frameFmt.setBottomMargin(30);
-        frameFmt.setLeftMargin(30);
-        frameFmt.setRightMargin(30);
         doc->rootFrame()->setFrameFormat(frameFmt);
         doc->setPageSize(QSizeF(-1, -1));
         doc->setTextWidth(editor->viewport()->width());

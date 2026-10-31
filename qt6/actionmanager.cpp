@@ -266,6 +266,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     addBaseTool(tr("Indent"), QKeySequence(), TextTools::indent);
     addBaseTool(tr("Unindent"), QKeySequence(), TextTools::unindent);
     addBaseTool(tr("Strip Blank Lines"), QKeySequence(), TextTools::stripBlankLines);
+    addBaseTool(tr("Remove Trailing Spaces"), QKeySequence(), TextTools::removeTrailingSpaces);
 
     toolsMenu->addSeparator();
     addTool(tr("Sort Lines (Ignore Case)"), TextTools::sortLines);
@@ -346,9 +347,8 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
     };
 
     addLayout(tr("&Normal Layout"), QKeySequence(Qt::CTRL | Qt::Key_1), NormalLayout, true);
-    addLayout(tr("&Web Layout"), QKeySequence(Qt::CTRL | Qt::Key_2), WebLayout, false);
-    addLayout(tr("&Print Layout"), QKeySequence(Qt::CTRL | Qt::Key_3), PrintLayout, false);
-    addLayout(tr("&Code Layout"), QKeySequence(Qt::CTRL | Qt::Key_4), CodeLayout, false);
+    addLayout(tr("&Print Layout"), QKeySequence(Qt::CTRL | Qt::Key_2), PrintLayout, false);
+    addLayout(tr("&Code Layout"), QKeySequence(Qt::CTRL | Qt::Key_3), CodeLayout, false);
 
     viewMenu->addSeparator();
     QAction *darkAct = new QAction(tr("Dark Mode"), m_window);
@@ -375,6 +375,14 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         dlg.exec();
     });
     helpMenu->addAction(htmlHelp);
+
+    QAction *markdownHelp = new QAction(tr("Markdown Cheat Sheet..."), m_window);
+    connect(markdownHelp, &QAction::triggered, this, [this](){
+        BaseEditor *base = m_window->currentBaseEditor();
+        MarkdownHelpDialog dlg(base, m_window);
+        dlg.exec();
+    });
+    helpMenu->addAction(markdownHelp);
 }
 
 void ActionManager::setupDefaultToolBar(QToolBar *toolbar) {

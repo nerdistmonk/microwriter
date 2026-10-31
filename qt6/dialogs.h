@@ -141,6 +141,17 @@ private:
     QTableWidget *tableWidget;
 };
 
+class MarkdownHelpDialog : public QDialog {
+    Q_OBJECT
+public:
+    explicit MarkdownHelpDialog(BaseEditor *editor, QWidget *parent = nullptr);
+private slots:
+    void applySelected();
+private:
+    BaseEditor *editor;
+    QTableWidget *tableWidget;
+};
+
 class ToolbarCustomizeDialog : public QDialog {
     Q_OBJECT
 public:
