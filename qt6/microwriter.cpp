@@ -44,6 +44,122 @@ static const QSet<QString> g_strictCodeLockExtensions = {
     "md", "markdown"
 };
 
+// Helper to convert markdown text to clean HTML when saving code/markdown views as HTML
+static QString markdownToHtml(const QString &md) {
+    QStringList lines = md.split('\n');
+    QStringList processedLines;
+    bool inList = false;
+    bool inTable = false;
+
+    auto closeListIfNeeded = [&]() {
+        if (inList) {
+            processedLines.append("</ul>");
+            inList = false;
+        }
+    };
+
+    auto closeTableIfNeeded = [&]() {
+        if (inTable) {
+            processedLines.append("</table>");
+            inTable = false;
+        }
+    };
+
+    for (int i = 0; i < lines.size(); ++i) {
+        QString line = lines[i];
+        QString trimmed = line.trimmed();
+
+        // Horizontal lines: ---, ***, ___
+        if (QRegularExpression("^([-*_])\\s*\\1\\s*\\1+$").match(trimmed).hasMatch()) {
+            closeListIfNeeded();
+            closeTableIfNeeded();
+            processedLines.append("<hr />");
+            continue;
+        }
+
+        // Tables: lines containing pipes |
+        if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+            closeListIfNeeded();
+            if (QRegularExpression("^\\|?\\s*[:\\-]+\\s*(\\|\\s*[:\\-]+\\s*)*\\|?$").match(trimmed).hasMatch()) {
+                continue; // Skip separator row
+            }
+
+            QStringList cells = trimmed.split('|');
+            cells.removeAll("");
+
+            QString rowHtml = "<tr>";
+            for (const QString &cell : cells) {
+                QString cellText = cell.trimmed();
+                if (!inTable) {
+                    rowHtml += QString("<th>%1</th>").arg(cellText);
+                } else {
+                    rowHtml += QString("<td>%1</td>").arg(cellText);
+                }
+            }
+            rowHtml += "</tr>";
+
+            if (!inTable) {
+                processedLines.append("<table border=\"1\" cellpadding=\"5\" cellspacing=\"0\">");
+                inTable = true;
+            }
+            processedLines.append(rowHtml);
+            continue;
+        } else {
+            closeTableIfNeeded();
+        }
+
+        // Headers: # to ######
+        QRegularExpression headerRe("^(#{1,6})\\s+(.*)$");
+        QRegularExpressionMatch headerMatch = headerRe.match(trimmed);
+        if (headerMatch.hasMatch()) {
+            closeListIfNeeded();
+            int level = headerMatch.captured(1).length();
+            QString text = headerMatch.captured(2).trimmed();
+            processedLines.append(QString("<h%1>%2</h%1>").arg(level).arg(text));
+            continue;
+        }
+
+        // Bullet lists: starts with *, -, or +
+        QRegularExpression listRe("^([*\\-+])\\s+(.*)$");
+        QRegularExpressionMatch listMatch = listRe.match(trimmed);
+        if (listMatch.hasMatch()) {
+            if (!inList) {
+                processedLines.append("<ul>");
+                inList = true;
+            }
+            QString itemText = listMatch.captured(2).trimmed();
+            itemText.replace(QRegularExpression(R"(!\[([^\]]*)\]\(([^)]+)\))"), R"(<img src="\2" alt="\1" />)");
+            itemText.replace(QRegularExpression(R"(\*\*([^*]+)\*\*)"), R"(<b>\1</b>)");
+            itemText.replace(QRegularExpression(R"(\*([^*]+)\*)"), R"(<i>\1</i>)");
+            processedLines.append(QString("  <li>%1</li>").arg(itemText));
+            continue;
+        } else {
+            closeListIfNeeded();
+        }
+
+        if (trimmed.isEmpty()) {
+            processedLines.append("<p></p>");
+        } else {
+            // Images must be processed BEFORE standard links so ![...] markdown isn't captured as a link
+            trimmed.replace(QRegularExpression(R"(!\[([^\]]*)\]\(([^)]+)\))"), R"(<img src="\2" alt="\1" />)");
+            trimmed.replace(QRegularExpression(R"(\*\*([^*]+)\*\*)"), R"(<b>\1</b>)");
+            trimmed.replace(QRegularExpression(R"(__([^_]+)__)"), R"(<b>\1</b>)");
+            trimmed.replace(QRegularExpression(R"(\*([^*]+)\*)"), R"(<i>\1</i>)");
+            trimmed.replace(QRegularExpression(R"(_([^_]+)_)"), R"(<i>\1</i>)");
+            trimmed.replace(QRegularExpression(R"(`([^`]+)`)"), R"(<code>\1</code>)");
+            trimmed.replace(QRegularExpression(R"(\[([^\]]+)\]\(([^)]+)\))"), R"(<a href="\2">\1</a>)");
+
+            processedLines.append(QString("<p>%1</p>").arg(trimmed));
+        }
+    }
+
+    closeListIfNeeded();
+    closeTableIfNeeded();
+
+    return QString("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n<title></title>\n</head>\n<body>\n%1\n</body>\n</html>")
+           .arg(processedLines.join("\n"));
+}
+
 MicroWriter::MicroWriter(QWidget *parent)
     : QMainWindow(parent),
       ruler(nullptr),
@@ -342,7 +458,6 @@ void MicroWriter::saveAsFile() {
     dialog.setNameFilters({
         "HTML Files (*.html *.htm)",
         "Text Files (*.txt)",
-        "Markdown (*.md)",
         "C/C++ Source (*.cpp *.c *.h *.hpp)",
         "All Files (*.*)"
     });
@@ -371,8 +486,7 @@ void MicroWriter::saveAsFile() {
 
         QFileInfo fileInfo(fileName);
         if (fileInfo.suffix().isEmpty()) {
-            if (selectedFilter.contains("*.md")) fileName += ".md";
-            else if (selectedFilter.contains("*.txt")) fileName += ".txt";
+            if (selectedFilter.contains("*.txt")) fileName += ".txt";
             else if (selectedFilter.contains("*.cpp")) fileName += ".cpp";
             else fileName += ".html";
         }
@@ -381,7 +495,10 @@ void MicroWriter::saveAsFile() {
 
         if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
             QString bufferText = codeEd->getRawPlainText();
-            if (newExt == "txt" && doStrip) {
+            
+            if (newExt == "html" || newExt == "htm") {
+                bufferText = markdownToHtml(bufferText);
+            } else if (newExt == "txt" && doStrip) {
                 QTextDocument tempDoc;
                 if (bufferText.contains("<html", Qt::CaseInsensitive) || bufferText.contains("<!DOCTYPE", Qt::CaseInsensitive) || bufferText.contains("<p>", Qt::CaseInsensitive)) {
                     tempDoc.setHtml(bufferText);
@@ -641,7 +758,7 @@ void MicroWriter::applyLayoutModeToEditor(EditorView *editor, LayoutMode mode) {
         editor->isPrintLayout = true;
         ruler->setVisible(true);
         editor->setStyleSheet(QString("EditorView { background-color: %1; }")
-            .arg(darkModeActive ? "#121212" : "#707070"));
+                                  .arg(darkModeActive ? "#121212" : "#707070"));
         frameFmt.setTopMargin(40);
         frameFmt.setBottomMargin(40);
         frameFmt.setLeftMargin(editor->leftMarginPixels() > 0 ? editor->leftMarginPixels() : 40);
@@ -745,12 +862,12 @@ void MicroWriter::updateWindowTitleAndStats() {
         else if (s.eol == EolCr) eolStr = "CR";
 
         statusLabel->setText(QString("Lines: %1 | Cols: %2 | Words: %3 | Chars: %4 | %5 | %6")
-            .arg(s.line)
-            .arg(s.column)
-            .arg(s.words)
-            .arg(s.characters)
-            .arg(s.encoding)
-            .arg(eolStr));
+                                 .arg(s.line)
+                                 .arg(s.column)
+                                 .arg(s.words)
+                                 .arg(s.characters)
+                                 .arg(s.encoding)
+                                 .arg(eolStr));
     }
 }
 

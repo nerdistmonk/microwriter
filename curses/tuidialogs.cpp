@@ -100,7 +100,7 @@ int showConfirmModal(const std::string &title, const std::string &message) {
 
     mvwprintw(win, 1, (width - static_cast<int>(title.length())) / 2, "%s", title.c_str());
     mvwprintw(win, 3, (width - static_cast<int>(message.length())) / 2, "%s", message.c_str());
-    mvwprintw(win, 5, (width - 34) / 2, "[Y] Save [N] Discard [Esc] Cancel");
+    mvwprintw(win, 5, (width - 34) / 2, "[Y] Save  [N] Discard  [Esc] Cancel");
     wrefresh(win);
 
     while (true) {
@@ -145,9 +145,7 @@ int showConfirmModal(const std::string &title, const std::string &message) {
 }
 
 static void updateExtensionForFormat(std::string &name, int newFmt) {
-    std::string targetExt = ".html";
-    if (newFmt == 1) targetExt = ".md";
-    else if (newFmt == 2) targetExt = ".txt";
+    std::string targetExt = (newFmt == 1) ? ".txt" : ".html";
 
     if (name.empty()) {
         name = "untitled" + targetExt;
@@ -182,8 +180,8 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
 
     int focusField = 0; // 0 = File name input, 1 = Format selector, 2 = Strip formatting toggle
     std::string inputName = filePath;
-    int currentFmt = formatType; // 0 = HTML (.html), 1 = Markdown (.md), 2 = Plain Text (.txt)
-    if (currentFmt < 0 || currentFmt > 2) currentFmt = 0;
+    int currentFmt = formatType; // 0 = HTML (.html), 1 = Plain Text (.txt)
+    if (currentFmt < 0 || currentFmt > 1) currentFmt = 0;
     bool doStrip = stripFormatting;
 
     int maxInputLen = width - 16;
@@ -210,22 +208,20 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
         mvwprintw(win, 5, 3, "Format: ");
         if (focusField == 1) wattron(win, A_REVERSE);
         if (currentFmt == 0) {
-            mvwprintw(win, 5, 12, "< HTML Document (*.html) >");
-        } else if (currentFmt == 1) {
-            mvwprintw(win, 5, 12, "< Markdown File (*.md) >");
+            mvwprintw(win, 5, 12, "< HTML Document (*.html) >   ");
         } else {
-            mvwprintw(win, 5, 12, "< Plain Text File (*.txt) >");
+            mvwprintw(win, 5, 12, "< Plain Text File (*.txt) > ");
         }
         if (focusField == 1) wattroff(win, A_REVERSE);
 
         // Row 7: Strip Formatting Checkbox (active when saving as .txt)
-        if (currentFmt == 2) {
+        if (currentFmt == 1) {
             if (focusField == 2) wattron(win, A_REVERSE);
             mvwprintw(win, 7, 3, "[%c] Strip HTML/Markdown tags & formatting", doStrip ? 'X' : ' ');
             if (focusField == 2) wattroff(win, A_REVERSE);
         } else {
             wattron(win, A_DIM);
-            mvwprintw(win, 7, 3, "[ ] Strip formatting (only for .txt)");
+            mvwprintw(win, 7, 3, "[ ] Strip formatting (only for .txt)      ");
             wattroff(win, A_DIM);
         }
 
@@ -242,9 +238,9 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
                 if (localY == 3) focusField = 0;
                 else if (localY == 5) {
                     focusField = 1;
-                    currentFmt = (currentFmt + 1) % 3;
+                    currentFmt = (currentFmt + 1) % 2;
                     updateExtensionForFormat(inputName, currentFmt);
-                } else if (localY == 7 && currentFmt == 2) {
+                } else if (localY == 7 && currentFmt == 1) {
                     focusField = 2;
                     doStrip = !doStrip;
                 }
@@ -259,31 +255,26 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
 
         if (ch == '\t' || ch == KEY_DOWN) {
             if (focusField == 0) focusField = 1;
-            else if (focusField == 1) focusField = (currentFmt == 2) ? 2 : 0;
+            else if (focusField == 1) focusField = (currentFmt == 1) ? 2 : 0;
             else focusField = 0;
             continue;
         }
         if (ch == KEY_BTAB || ch == KEY_UP) {
             if (focusField == 2) focusField = 1;
             else if (focusField == 1) focusField = 0;
-            else focusField = (currentFmt == 2) ? 2 : 1;
+            else focusField = (currentFmt == 1) ? 2 : 1;
             continue;
         }
 
         if (focusField == 1) {
-            if (ch == ' ' || ch == KEY_RIGHT) {
-                currentFmt = (currentFmt + 1) % 3;
-                updateExtensionForFormat(inputName, currentFmt);
-                continue;
-            }
-            if (ch == KEY_LEFT) {
-                currentFmt = (currentFmt + 2) % 3;
+            if (ch == ' ' || ch == KEY_RIGHT || ch == KEY_LEFT) {
+                currentFmt = (currentFmt + 1) % 2;
                 updateExtensionForFormat(inputName, currentFmt);
                 continue;
             }
         }
 
-        if (focusField == 2 && currentFmt == 2) {
+        if (focusField == 2 && currentFmt == 1) {
             if (ch == ' ') {
                 doStrip = !doStrip;
                 continue;
@@ -296,7 +287,7 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
             delwin(win);
             filePath = inputName;
             formatType = currentFmt;
-            stripFormatting = (currentFmt == 2) ? doStrip : false;
+            stripFormatting = (currentFmt == 1) ? doStrip : false;
             return true;
         }
 
@@ -748,19 +739,19 @@ void showAboutModal() {
     drawDialogBorder(win, height, width);
 
     mvwprintw(win, 1, (width - 15) / 2, "MicroWriter TUI");
-    mvwprintw(win, 3, 3, "F1: Help F2: New Tab F3: Cycle Tabs");
-    mvwprintw(win, 4, 3, "F4/Ctrl+F: Find/Replace F5: Rich Layout F6: Code");
-    mvwprintw(win, 5, 3, "F7/Ctrl+O: Open F8/Ctrl+S: Save F9/Alt+S: Spell Check");
-    mvwprintw(win, 6, 3, "F10: Export ODF F11: Menu Bar F12/Ctrl+Q: Quit");
+    mvwprintw(win, 3, 3, "F1: Help          F2: New Tab       F3: Cycle Tabs");
+    mvwprintw(win, 4, 3, "F4/Ctrl+F: Find/Replace             F5: Rich Layout   F6: Code");
+    mvwprintw(win, 5, 3, "F7/Ctrl+O: Open   F8/Ctrl+S: Save   F9/Alt+S: Spell Check");
+    mvwprintw(win, 6, 3, "F10: Export ODF   F11: Menu Bar     F12/Ctrl+Q: Quit");
 
-    mvwprintw(win, 8, 3, "Ctrl+X: Cut Ctrl+C: Copy Ctrl+V: Paste");
+    mvwprintw(win, 8, 3, "Ctrl+X: Cut       Ctrl+C: Copy      Ctrl+V: Paste");
     mvwprintw(win, 9, 3, "Ctrl+A: Select All Ctrl+D: Cut Line Ctrl+Z/Ctrl+E: Undo");
-    mvwprintw(win, 10, 3, "Ctrl+R: Redo Tab: 4-Spaces Indent");
+    mvwprintw(win, 10, 3, "Ctrl+R: Redo      Tab: 4-Spaces Indent");
 
     mvwprintw(win, 12, 3, "Tabs: Double-click = New Tab, Right-click = Close Menu");
     mvwprintw(win, 13, 3, "Clipboard: Native wl-copy / xclip bidirectional sync");
     mvwprintw(win, 14, 3, "Navigation: Arrows, PgUp, PgDn, Home, End");
-    mvwprintw(win, 15, 3, "Cancel : Esc cancels prompts/menus");
+    mvwprintw(win, 15, 3, "Cancel    : Esc cancels prompts/menus");
 
     mvwprintw(win, 17, (width - 24) / 2, "[ Press Esc or Any Key ]");
 
@@ -825,7 +816,7 @@ int showHtmlCheatSheetModal(std::string &outTag) {
         {"Anchor / Link", "<a href=\"\"></a>"},
         {"Image element", "<img src=\"\" alt=\"\" />"},
         {"Unordered List", "<ul>\n  <li></li>\n</ul>"},
-        {"Ordered List", "<ol>\n  <li></li>\n</ol>"},
+        {"Ordered List", "<ol>\n  <li></li>\n</ul>"},
         {"Blockquote", "<blockquote></blockquote>"},
         {"Inline Code", "<code></code>"},
         {"Code Block", "<pre><code></code></pre>"},
@@ -890,7 +881,7 @@ int showBashScriptCheatSheetModal(std::string &outScript) {
         },
         {
             "CLI Option & Argument Parser (getopts)",
-            "while getopts \":f:h\" opt; do\n  case ${opt} in\n    f ) FILE=\"$OPTARG\" ;;\n    h ) echo \"Usage: $0 [-f file]\"; exit 0 ;;\n    \\? ) echo \"Invalid Option: -$OPTARG\" 1>&2; exit 1 ;;\n  esac\ndone\n"
+            "while getopts \":f:h\" opt; do\n    case ${opt} in\n        f ) FILE=\"$OPTARG\" ;;\n        h ) echo \"Usage: $0 [-f file]\"; exit 0 ;;\n        \\? ) echo \"Invalid Option: -$OPTARG\" 1>&2; exit 1 ;;\n    esac\ndone\n"
         },
         {
             "Traverse Directory & Loop Over Files Safe",

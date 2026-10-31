@@ -26,15 +26,6 @@ std::string formatInlineMarkdownToHtml(std::string text) {
     return text;
 }
 
-std::string formatInlineHtmlToMarkdown(std::string text) {
-    text = std::regex_replace(text, std::regex(R"(<code[^>]*>([\s\S]*?)</code>)"), "`$1`");
-    text = std::regex_replace(text, std::regex(R"(<(strong|b)[^>]*>([\s\S]*?)</\1>)"), "**$2**");
-    text = std::regex_replace(text, std::regex(R"(<(em|i)[^>]*>([\s\S]*?)</\1>)"), "*$2*");
-    text = std::regex_replace(text, std::regex(R"(<span[^>]*font-weight:\s*(700|bold)[^>]*>([\s\S]*?)</span>)"), "**$2**");
-    text = std::regex_replace(text, std::regex(R"(<span[^>]*>([\s\S]*?)</span>)"), "$1");
-    return text;
-}
-
 std::vector<std::vector<std::string>> parseHtmlTableRows(const std::string &tableHtml) {
     std::string normalized = tableHtml;
 
@@ -76,7 +67,7 @@ std::vector<std::vector<std::string>> parseHtmlTableRows(const std::string &tabl
             cellText = std::regex_replace(cellText, std::regex(R"(<br\s*/?>)", std::regex::icase), "\n");
             cellText = std::regex_replace(cellText, std::regex(R"(\s*\n\s*)"), " ");
             cellText = std::regex_replace(cellText, std::regex(R"(^\s+|\s+$)"), "");
-            cells.push_back(formatInlineHtmlToMarkdown(cellText));
+            cells.push_back(cellText);
         }
 
         if (!cells.empty()) {
@@ -108,147 +99,6 @@ static size_t findMatchingTableEnd(const std::string &html, size_t startPos) {
         }
     }
     return std::string::npos;
-}
-
-std::string serializeLinesToMarkdown(const std::vector<std::string> &lines) {
-    std::ostringstream out;
-    size_t i = 0;
-    bool inStyle = false;
-
-    while (i < lines.size()) {
-        std::string l = lines[i];
-
-        if (l.find("<style") != std::string::npos) {
-            inStyle = true;
-            if (l.find("</style>") != std::string::npos) inStyle = false;
-            ++i;
-            continue;
-        }
-        if (inStyle) {
-            if (l.find("</style>") != std::string::npos) inStyle = false;
-            ++i;
-            continue;
-        }
-
-        if (l.find("<table") != std::string::npos) {
-            if (l.find("-qt-table-type: root") != std::string::npos || l.find("-qt-table-type:root") != std::string::npos) {
-                ++i;
-                continue;
-            }
-
-            std::string tableContent;
-            size_t depth = 0;
-            while (i < lines.size()) {
-                tableContent += lines[i] + "\n";
-                if (lines[i].find("<table") != std::string::npos) {
-                    depth++;
-                }
-                if (lines[i].find("</table>") != std::string::npos) {
-                    if (depth > 0) depth--;
-                    if (depth == 0) break;
-                }
-                ++i;
-            }
-
-            auto rows = parseHtmlTableRows(tableContent);
-            if (!rows.empty()) {
-                size_t maxCols = 0;
-                for (const auto &r : rows) maxCols = std::max(maxCols, r.size());
-
-                out << "\n|";
-                for (size_t c = 0; c < maxCols; ++c) {
-                    std::string val = (c < rows[0].size()) ? rows[0][c] : " ";
-                    out << " " << val << " |";
-                }
-                out << "\n|";
-                for (size_t c = 0; c < maxCols; ++c) {
-                    out << " --- |";
-                }
-                out << "\n";
-                for (size_t r = 1; r < rows.size(); ++r) {
-                    out << "|";
-                    for (size_t c = 0; c < maxCols; ++c) {
-                        std::string val = (c < rows[r].size()) ? rows[r][c] : " ";
-                        out << " " << val << " |";
-                    }
-                    out << "\n";
-                }
-                out << "\n";
-            }
-
-            ++i;
-            continue;
-        }
-
-        std::regex hRegex(R"(<h([1-6])\b[^>]*>([\s\S]*?)</h\1\s*>)", std::regex::icase);
-        std::smatch hMatch;
-        if (std::regex_search(l, hMatch, hRegex)) {
-            int level = std::stoi(hMatch[1].str());
-            std::string content = hMatch[2].str();
-            std::string prefix(level, '#');
-            out << prefix << " " << formatInlineHtmlToMarkdown(content) << "\n\n";
-            ++i;
-            continue;
-        }
-
-        std::regex liRegex(R"(<li\b[^>]*>([\s\S]*?)</li>\s*)", std::regex::icase);
-        std::smatch liMatch;
-        if (std::regex_search(l, liMatch, liRegex)) {
-            std::string content = liMatch[1].str();
-            out << "- " << formatInlineHtmlToMarkdown(content) << "\n";
-            ++i;
-            continue;
-        }
-
-        if (l.find("<hr") != std::string::npos) {
-            out << "---\n\n";
-            ++i;
-            continue;
-        }
-
-        if (l.find("<blockquote") != std::string::npos) {
-            std::string q = std::regex_replace(l, std::regex(R"(</?blockquote[^>]*)", std::regex::icase), "");
-            size_t first = q.find_first_not_of(" \t");
-            q = (first != std::string::npos) ? ("> " + q.substr(first)) : "> ";
-            out << formatInlineHtmlToMarkdown(q) << "\n\n";
-            ++i;
-            continue;
-        }
-
-        std::regex pRegex(R"(<p\b[^>]*>([\s\S]*?)</p\s*>)", std::regex::icase);
-        std::smatch pMatch;
-        if (std::regex_search(l, pMatch, pRegex)) {
-            std::string content = pMatch[1].str();
-            if (content == "<br />" || content == "<br>" || content == "<br/>" || content.empty()) {
-                out << "\n";
-            } else {
-                out << formatInlineHtmlToMarkdown(content) << "\n\n";
-            }
-            ++i;
-            continue;
-        }
-
-        if (l.find("<!DOCTYPE") != std::string::npos || l.find("<html") != std::string::npos ||
-            l.find("</html>") != std::string::npos || l.find("<head") != std::string::npos ||
-            l.find("</head>") != std::string::npos || l.find("<body") != std::string::npos ||
-            l.find("</body>") != std::string::npos || l.find("<ul") != std::string::npos ||
-            l.find("</ul>") != std::string::npos || l.find("<ol") != std::string::npos ||
-            l.find("ol>") != std::string::npos) {
-            ++i;
-            continue;
-        }
-
-        if (l.rfind("• ", 0) == 0) {
-            l = "- " + l.substr(std::string("• ").length());
-        }
-
-        out << formatInlineHtmlToMarkdown(l) << "\n";
-        ++i;
-    }
-
-    std::string res = out.str();
-    res = std::regex_replace(res, std::regex(R"(\n{3,})"), "\n\n");
-    return res;
 }
 
 std::string serializeLinesToHtml(const std::vector<std::string> &lines) {
@@ -474,11 +324,7 @@ std::string serializeDocToRaw(const EditorDocument &d) {
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     }
 
-    if (ext == "md") {
-        return serializeLinesToMarkdown(d.lines);
-    }
-
-    if (ext == "txt") {
+    if (ext == "txt" || ext == "md" || ext == "markdown") {
         return serializeLinesToPlainText(d.lines);
     }
 
@@ -515,11 +361,11 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent) {
     }
 
     if (isHtml && (rawContent.find("<p") != std::string::npos || rawContent.find("<li") != std::string::npos ||
-        rawContent.find("<h1") != std::string::npos || rawContent.find("<h2") != std::string::npos ||
-        rawContent.find("<h3") != std::string::npos || rawContent.find("<h4") != std::string::npos ||
-        rawContent.find("<h5") != std::string::npos || rawContent.find("<h6") != std::string::npos ||
-        rawContent.find("<table") != std::string::npos || rawContent.find("<hr") != std::string::npos ||
-        rawContent.find("<blockquote") != std::string::npos)) {
+                   rawContent.find("<h1") != std::string::npos || rawContent.find("<h2") != std::string::npos ||
+                   rawContent.find("<h3") != std::string::npos || rawContent.find("<h4") != std::string::npos ||
+                   rawContent.find("<h5") != std::string::npos || rawContent.find("<h6") != std::string::npos ||
+                   rawContent.find("<table") != std::string::npos || rawContent.find("<hr") != std::string::npos ||
+                   rawContent.find("<blockquote") != std::string::npos)) {
         size_t pos = 0;
         int currentOlNum = 1;
         bool insideOl = false;

@@ -26,7 +26,6 @@ EditorView::EditorView(QWidget *parent)
       m_eolFormat(EolLf),
       m_headerText(""),
       m_footerText(""),
-      m_rawMarkdownSource(""),
       m_selectedImagePos(-1),
       m_isResizingImage(false),
       m_dragWidth(0),
@@ -50,7 +49,11 @@ QString EditorView::getContentForSave() {
     QString content;
     QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
 
-    if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || m_filePath.endsWith(".htm", Qt::CaseInsensitive) || m_filePath.isEmpty()) {
+    if (m_filePath.endsWith(".html", Qt::CaseInsensitive) || 
+        m_filePath.endsWith(".htm", Qt::CaseInsensitive) || 
+        m_filePath.endsWith(".md", Qt::CaseInsensitive) || 
+        m_filePath.endsWith(".markdown", Qt::CaseInsensitive) || 
+        m_filePath.isEmpty()) {
         content = toHtml();
         content.replace(QRegularExpression("<!DOCTYPE[^>]*>", QRegularExpression::CaseInsensitiveOption), "<!DOCTYPE html>");
 
@@ -85,8 +88,8 @@ QString EditorView::getContentForSave() {
         int defSize = document()->defaultFont().pointSize();
         if (defSize <= 0) defSize = 10;
         QString fontSpanPattern = QString(R"(<span\s+style="\s*font-family:'%1';\s*font-size:%2pt;\s*font-weight:\d+;\s*font-style:normal;\s*">([\s\S]*?)</span>)")
-            .arg(QRegularExpression::escape(defFamily))
-            .arg(defSize);
+                                      .arg(QRegularExpression::escape(defFamily))
+                                      .arg(defSize);
         content.replace(QRegularExpression(fontSpanPattern), "\\1");
         content.replace(QRegularExpression(R"(\s*style="\s*")"), "");
     } else {
@@ -97,7 +100,6 @@ QString EditorView::getContentForSave() {
 
 void EditorView::setContent(const QString &content, const QString &fileName) {
     m_filePath = fileName;
-    m_rawMarkdownSource.clear();
 
     if (fileName.endsWith(".html", Qt::CaseInsensitive) || fileName.endsWith(".htm", Qt::CaseInsensitive)) {
         setHtml(content);
