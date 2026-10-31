@@ -14,16 +14,6 @@ namespace TuiActions {
 
 static std::string s_clipboard;
 
-bool isMarkdownDoc(const EditorDocument &doc) {
-    std::string ext = "";
-    size_t dot = doc.filePath.find_last_of('.');
-    if (dot != std::string::npos) {
-        ext = doc.filePath.substr(dot + 1);
-        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    }
-    return (ext == "md");
-}
-
 static void writeToSystemClipboard(const std::string &text) {
     FILE *fp = popen("wl-copy 2>/dev/null", "w");
     if (!fp) fp = popen("xclip -selection clipboard 2>/dev/null", "w");
@@ -304,7 +294,6 @@ void handleInsertImage(EditorDocument &doc) {
     std::string imgPath = TuiDialogs::showPromptModal("Enter image file path/name: ");
     if (imgPath.empty()) return;
 
-    // Extract a basic filename for the alt text
     size_t lastSlash = imgPath.find_last_of("/\\");
     std::string altText = (lastSlash == std::string::npos) ? imgPath : imgPath.substr(lastSlash + 1);
 

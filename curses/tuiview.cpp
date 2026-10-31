@@ -269,18 +269,14 @@ void render(
     clrtoeol();
 
     const auto &buttons = (doc.mode == TuiMode::RichText) ? toolbarButtons : codeButtons;
-    bool isMd = TuiActions::isMarkdownDoc(doc);
     int toolOffset = 1;
     for (size_t b = 0; b < buttons.size(); ++b) {
         bool isSave = (buttons[b] == "Save");
-        bool isTypo = (doc.mode == TuiMode::RichText && isMd && (buttons[b] == "Font" || buttons[b] == "Size"));
         
         int pair = (isSave && saveFlash) ? 3 : 2;
         chtype attr = COLOR_PAIR(pair);
         if (isSave && saveFlash) {
             attr |= A_BOLD | A_REVERSE;
-        } else if (isTypo) {
-            attr |= A_DIM;
         }
 
         attron(attr);
@@ -298,7 +294,6 @@ void render(
     const char *wrapLabel = (doc.wrapMode == TuiWrapMode::Off) ? "Off" :
         (doc.wrapMode == TuiWrapMode::Soft ? "Soft" : "Hard");
 
-    // Compute normalized selection range
     TextPosition selStart = doc.cursor;
     TextPosition selEnd = doc.selectionAnchor;
     if (selEnd < selStart) {
