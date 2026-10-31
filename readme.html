@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title></title>
+</head>
+<body>
+<h1>MicroWriter</h1>
+<p></p>
+<p><b>The diet soda of word processors, same refreshing taste, half the calories!</b></p>
+<p></p>
+<p><b>Version 2.7, released on October 28th, 2026</b></p>
+<p></p>
+<p>A lightweight, distraction-free rich text editor and code notepad built with C++ and Qt. MicroWriter combines the simplicity of a classic notepad with essential word processing tools, multi-tab editing, and versatile document export capabilities.</p>
+<p></p>
+<p><img src="shot.png" alt="shot" /> <img src="shot2.png" alt="shot2" /> <img src="shot3.png" alt="shot3" /></p>
+<p></p>
+<hr />
+<p></p>
+<h2>Features</h2>
+<p></p>
+<ul>
+  <li><b>Multi-Tab Interface:</b> Work on multiple documents simultaneously with per-tab layout memory.</li>
+  <li><b>Rich Text Formatting:</b> Bold, italic, underline, strikethrough, text color, highlight color, font family, and font size.</li>
+  <li><b>Four Layout Modes:</b> Switch seamlessly between Normal, Web, Print, and Code Layout modes.</li>
+  <li><b>Dedicated Code Mode:</b> Clean code editor with line numbering, bracket matching, syntax highlighting, and auto-detection for common source files.</li>
+  <li><b>Safety Lockout:</b> Prevents a user from accidentally switching to rich text edit mode while working on source files.</li>
+  <li><b>Context-Aware Menus:</b> The Format menu automatically hides while working in Code Layout to keep the workspace clean and focused.</li>
+  <li><b>Dual-Profile Customizable Toolbars:</b> Separate, persistent toolbar setups for Rich Text and Code modes—right-click any toolbar to customize buttons, create new stacked rows, or remove bars.</li>
+  <li><b>Universal Find and Replace:</b> Fast text and regex search with match replacement across both rich text and code editors.</li>
+  <li><b>Document Ruler:</b> Visual interactive ruler for margins and tabs.</li>
+  <li><b>Live Statistics:</b> Real-time character count, word count, line/column tracking, encoding display, and newline mode detection (CRLF, LF, CR).</li>
+  <li><b>Dark Mode Support:</b> Clean light and dark theme toggling.</li>
+  <li><b>Multi-Format Support:</b> Open and save Markdown (`.md`), HTML (`.html`), plain text (`.txt`), and source code files, plus export to PDF and ODT.</li>
+</ul>
+<p></p>
+<hr />
+<p></p>
+<h2>Keyboard Shortcuts for the Qt6 GUI</h2>
+<p></p>
+<h3>File Operations</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>`Ctrl + N`</td><td>**New tab / document**</td></tr>
+<tr><td>`Ctrl + O`</td><td>**Open file**</td></tr>
+<tr><td>`Ctrl + S`</td><td>**Save current file**</td></tr>
+<tr><td>`Ctrl + Shift + S`</td><td>**Save As**</td></tr>
+<tr><td>`Ctrl + W`</td><td>**Close active tab**</td></tr>
+<tr><td>`Ctrl + P`</td><td>**Print document**</td></tr>
+<tr><td>`Ctrl + Q`</td><td>**Exit MicroWriter**</td></tr>
+</table>
+<p></p>
+<h3>Editing & Navigation</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>`Ctrl + Z`</td><td>**Undo**</td></tr>
+<tr><td>`Ctrl + Y` / `Ctrl + Shift + Z`</td><td>**Redo**</td></tr>
+<tr><td>`Ctrl + X`</td><td>**Cut**</td></tr>
+<tr><td>`Ctrl + C`</td><td>**Copy**</td></tr>
+<tr><td>`Ctrl + V`</td><td>**Paste**</td></tr>
+<tr><td>`Ctrl + A`</td><td>**Select all text**</td></tr>
+<tr><td>`Ctrl + F`</td><td>**Find and Replace**</td></tr>
+<tr><td>`Alt + Q`</td><td>**Next Tab**</td></tr>
+</table>
+<p></p>
+<h3>View & Layout Modes</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>`Ctrl + 1`</td><td>**Normal Layout**</td></tr>
+<tr><td>`Ctrl + 2`</td><td>**Web Layout**</td></tr>
+<tr><td>`Ctrl + 3`</td><td>**Print Layout**</td></tr>
+<tr><td>`Ctrl + 4`</td><td>**Code Layout**</td></tr>
+</table>
+<p></p>
+<h3>Text Formatting (Rich Text Modes)</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>`Ctrl + B`</td><td>**Bold**</td></tr>
+<tr><td>`Ctrl + I`</td><td>**Italic**</td></tr>
+<tr><td>`Ctrl + U`</td><td>**Underline**</td></tr>
+<tr><td>`Ctrl + Shift + X`</td><td>**Strikethrough**</td></tr>
+<tr><td>`Ctrl + L`</td><td>**Align Left**</td></tr>
+<tr><td>`Ctrl + E`</td><td>**Align Center**</td></tr>
+<tr><td>`Ctrl + R`</td><td>**Align Right**</td></tr>
+<tr><td>`Ctrl + J`</td><td>**Justify**</td></tr>
+</table>
+<p></p>
+<hr />
+<p></p>
+<h2>Keyboard Shortcuts for the NCurses TUI</h2>
+<p></p>
+<h3>Function Key System (F1 – F12)</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>**F1**</td><td>**Help & About Dialog**</td></tr>
+<tr><td>**F2**</td><td>**New Tab / Document**</td></tr>
+<tr><td>**F3**</td><td>**Cycle Through Tabs**</td></tr>
+<tr><td>**F4**</td><td>**Find & Replace (Regex / Plain Text)**</td></tr>
+<tr><td>**F5**</td><td>**Switch to Rich Text Layout**</td></tr>
+<tr><td>**F6**</td><td>**Switch to Code Layout**</td></tr>
+<tr><td>**F7**</td><td>**Open File Dialog**</td></tr>
+<tr><td>**F8**</td><td>**Save Current File**</td></tr>
+<tr><td>**F9**</td><td>**Aspell Spelling Correction Dialog**</td></tr>
+<tr><td>**F10**</td><td>**Export Document as ODF**</td></tr>
+<tr><td>**F11**</td><td>**Activate Dropdown Menu Bar**</td></tr>
+<tr><td>**F12**</td><td>**Quit / Exit MicroWriter**</td></tr>
+</table>
+<p></p>
+<h3>File & App Operations</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>**Ctrl + S**</td><td>**Save Current File (Flashes Save indicator)**</td></tr>
+<tr><td>**Ctrl + Q**</td><td>**Quit / Exit MicroWriter (Checks for unsaved changes)**</td></tr>
+<tr><td>**Ctrl + F**</td><td>**Find/Replace**</td></tr>
+<tr><td>**Ctrl + O**</td><td>**Open File**</td></tr>
+</table>
+<p></p>
+<h3>Editing & Clipboard</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>**Ctrl + X**</td><td>**Cut Selection / Line (Syncs to system clipboard)**</td></tr>
+<tr><td>**Ctrl + C**</td><td>**Copy Selection / Line (Syncs to system clipboard)**</td></tr>
+<tr><td>**Ctrl + V**</td><td>**Paste (Reads from system clipboard: wl-paste / xclip)**</td></tr>
+<tr><td>**Ctrl + D**</td><td>**Nano-style Cut Entire Line**</td></tr>
+<tr><td>**Ctrl + A**</td><td>**Select All Text**</td></tr>
+<tr><td>**Ctrl + E / Ctrl + Z**</td><td>**Undo**</td></tr>
+<tr><td>**Ctrl + R**</td><td>**Redo**</td></tr>
+<tr><td>**Tab**</td><td>**Indent 4 Spaces / Block Indent Selection**</td></tr>
+<tr><td>*Shift + Tab (Backtab)*</td><td>**Unindent Line / Selection**</td></tr>
+</table>
+<p></p>
+<h3>Navigation & Dialogs</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Shortcut</th><th>Action</th></tr>
+<tr><td>**Arrows**</td><td>**Navigate cursor**</td></tr>
+<tr><td>**PgUp / PgDn**</td><td>**Scroll page up / down**</td></tr>
+<tr><td>**Home / End**</td><td>**Jump to line start / end**</td></tr>
+<tr><td>**Esc**</td><td>**Cancel active prompt, cheat sheet, or menu**</td></tr>
+</table>
+<p></p>
+<h3>Mouse Actions</h3>
+<p></p>
+<table border="1" cellpadding="5" cellspacing="0">
+<tr><th>Mouse Event</th><th>Target</th><th>Action</th></tr>
+<tr><td>**Click**</td><td>**Menu Bar (Row 0)**</td><td>**Open dropdown menus**</td></tr>
+<tr><td>**Click**</td><td>**Tab Bar (Row 1)**</td><td>**Switch active tab**</td></tr>
+<tr><td>**Double-Click**</td><td>**Tab Bar (Row 1)**</td><td>**Create new tab**</td></tr>
+<tr><td>**Right-Click**</td><td>**Tab (Row 1)**</td><td>**Tab Context Menu (Save, Close, Save & Close)**</td></tr>
+<tr><td>**Click**</td><td>**Toolbar (Row 2)**</td><td>**Quick actions (Save, PDF, Open, Formatting, Comments)**</td></tr>
+<tr><td>**Click / Drag**</td><td>**Content Area**</td><td>**Position cursor or create text selection**</td></tr>
+<tr><td>**Click**</td><td>**Gutter (Code Mode)**</td><td>**Select entire line**</td></tr>
+<tr><td>**Mouse Wheel**</td><td>**Editor / Dialogs**</td><td>**Scroll document viewport or modal lists smoothly**</td></tr>
+</table>
+<p></p>
+<hr />
+<p></p>
+<h2>Build Requirements</h2>
+<p></p>
+<ul>
+  <li><b>C++17 compatible compiler (GCC or Clang)</b></li>
+  <li><b>CMake 3.16 or higher</b></li>
+  <li><b>ncurses library (with wide-character/mouse support)</b></li>
+  <li><b>fontconfig (recommended for full system font discovery)</b></li>
+  <li><b>wl-clipboard (wl-copy/wl-paste) or xclip / xsel (for external clipboard integration)</b></li>
+  <li><b>Qt 6 (Core, Gui, Widgets, PrintSupport - for shared build target)</b></li>
+</ul>
+<p></p>
+<h2>Build Commands</h2>
+<p></p>
+<p>```bash</p>
+<p>mkdir build && cd build</p>
+<p>cmake ..</p>
+<p>cmake --build .</p>
+<p></p>
+<h1>Launch directly into the console TUI or force code editing mode:</h1>
+<p>microwriter -c [file1] [file2] ...</p>
+<p>microwriter --console [file1] [file2] ...</p>
+<p></p>
+<h1>Launch directly in Code Layout mode</h1>
+<p>microwriter -C [file1] [file2] ...</p>
+<p>microwriter --code [file1] [file2] ...</p>
+</body>
+</html>
