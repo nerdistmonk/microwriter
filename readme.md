@@ -26,7 +26,8 @@ A lightweight, distraction-free rich text editor and code notepad built with C++
 - **Multi-Format Support:** Supports HTML as it's primary format. It can convert markdown to html when saved as HTML. All other formats are opened directly into Code Layout mode.
 
 ---
-
+### doc2html is an included extra for converting docx, doc and rtf to html format, it requires libzip and libxml to build.
+---
 ## Keyboard Shortcuts for the Qt6 GUI
 
 ### File Operations

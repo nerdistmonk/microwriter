@@ -1,0 +1,4 @@
+#gcc docx2html.c -o docx2html $(pkg-config --cflags --libs libzip libxml-2.0) -O3
+#gcc doc2html.c -o doc2html -O3
+cd doc2html
+gcc doc2html.c -o doc2html $(pkg-config --cflags --libs libzip libxml-2.0) -O3
