@@ -284,16 +284,28 @@ void handleMouseEvent(const MEVENT &event, TuiEditorContext &ctx) {
         } else {
             targetLine = doc.scrollLine + (clampedY - contentTop);
             targetLine = std::clamp(targetLine, 0, static_cast<int>(doc.lines.size()) - 1);
-            targetCol = std::max(0, mx - lineNumWidth);
+            int clickedColOffset = std::max(0, mx - lineNumWidth);
+            targetCol = doc.wrapMode == TuiWrapMode::Off ? (doc.scrollCol + clickedColOffset) : clickedColOffset;
             targetCol = std::min(targetCol, static_cast<int>(doc.lines[targetLine].length()));
         }
 
         if (doc.mode == TuiMode::Code && mx < lineNumWidth) {
-            doc.selectionAnchor.line = targetLine;
-            doc.selectionAnchor.col = 0;
-            doc.cursor.line = targetLine;
-            doc.cursor.col = static_cast<int>(doc.lines[targetLine].length());
-            doc.hasSelection = true;
+            if (doc.hasSelection && (event.bstate & BUTTON1_PRESSED)) {
+                int startLine = std::min(doc.selectionAnchor.line, targetLine);
+                int endLine = std::max(doc.selectionAnchor.line, targetLine);
+                
+                doc.selectionAnchor.line = startLine;
+                doc.selectionAnchor.col = 0;
+                doc.cursor.line = endLine;
+                doc.cursor.col = static_cast<int>(doc.lines[endLine].length());
+                doc.hasSelection = (startLine != endLine || doc.selectionAnchor.col != doc.cursor.col);
+            } else if (event.bstate & BUTTON1_PRESSED) {
+                doc.selectionAnchor.line = targetLine;
+                doc.selectionAnchor.col = 0;
+                doc.cursor.line = targetLine;
+                doc.cursor.col = static_cast<int>(doc.lines[targetLine].length());
+                doc.hasSelection = true;
+            }
             return;
         }
 

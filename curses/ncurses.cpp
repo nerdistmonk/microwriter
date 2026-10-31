@@ -134,10 +134,25 @@ private:
     void updateScroll() {
         int contentTop = 3;
         int contentHeight = std::max(1, LINES - contentTop - 1);
+        int lineNumWidth = (doc().mode == TuiMode::Code) ? 6 : 0;
+        int usableWidth = std::max(10, COLS - lineNumWidth - 2);
+
+        // Vertical scroll
         if (doc().cursor.line < doc().scrollLine) {
             doc().scrollLine = doc().cursor.line;
         } else if (doc().cursor.line >= doc().scrollLine + contentHeight) {
             doc().scrollLine = doc().cursor.line - contentHeight + 1;
+        }
+
+        // Horizontal scroll (only when wrap is Off)
+        if (doc().wrapMode == TuiWrapMode::Off) {
+            if (doc().cursor.col < doc().scrollCol) {
+                doc().scrollCol = doc().cursor.col;
+            } else if (doc().cursor.col >= doc().scrollCol + usableWidth) {
+                doc().scrollCol = doc().cursor.col - usableWidth + 1;
+            }
+        } else {
+            doc().scrollCol = 0;
         }
     }
 

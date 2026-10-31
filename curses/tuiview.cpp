@@ -367,8 +367,17 @@ void render(
         } else {
             logicalLine = doc.scrollLine + y;
             if (logicalLine < static_cast<int>(doc.lines.size())) {
-                displayText = doc.lines[logicalLine];
-                colOffset = 0;
+                const std::string &fullLine = doc.lines[logicalLine];
+                if (doc.wrapMode == TuiWrapMode::Off && doc.scrollCol < static_cast<int>(fullLine.length())) {
+                    displayText = fullLine.substr(doc.scrollCol);
+                    colOffset = doc.scrollCol;
+                } else if (doc.wrapMode == TuiWrapMode::Off) {
+                    displayText = "";
+                    colOffset = doc.scrollCol;
+                } else {
+                    displayText = fullLine;
+                    colOffset = 0;
+                }
             }
         }
 
@@ -450,6 +459,8 @@ void render(
             colInSegment = doc.cursor.col - segments[subRow].colOffset;
         }
         screenCursorX = lineNumWidth + std::min(colInSegment, static_cast<int>(COLS - lineNumWidth - 1));
+    } else {
+        screenCursorX = lineNumWidth + std::max(0, doc.cursor.col - doc.scrollCol);
     }
 
     if (screenCursorY >= contentTop && screenCursorY < contentTop + contentHeight) {
