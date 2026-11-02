@@ -46,6 +46,10 @@ void EditorView::setDarkMode(bool dark) {
 }
 
 QString EditorView::getContentForSave() {
+    if (m_filePath.endsWith(".txt", Qt::CaseInsensitive)) {
+        return toPlainText();
+    }
+
     QString content;
     QDir docDir = m_filePath.isEmpty() ? QDir::current() : QFileInfo(m_filePath).dir();
 
@@ -88,8 +92,8 @@ QString EditorView::getContentForSave() {
         int defSize = document()->defaultFont().pointSize();
         if (defSize <= 0) defSize = 10;
         QString fontSpanPattern = QString(R"(<span\s+style="\s*font-family:'%1';\s*font-size:%2pt;\s*font-weight:\d+;\s*font-style:normal;\s*">([\s\S]*?)</span>)")
-                                      .arg(QRegularExpression::escape(defFamily))
-                                      .arg(defSize);
+                                  .arg(QRegularExpression::escape(defFamily))
+                                  .arg(defSize);
         content.replace(QRegularExpression(fontSpanPattern), "\\1");
         content.replace(QRegularExpression(R"(\s*style="\s*")"), "");
     } else {
@@ -381,6 +385,35 @@ void EditorView::contextMenuEvent(QContextMenuEvent *event) {
 void EditorView::paintEvent(QPaintEvent *event) {
     QTextEdit::paintEvent(event);
 
+    // 1. Draw Page Boundary / Break Line (Red Line) in Print Layout
+    if (isPrintLayout || m_layoutMode == PrintLayout) {
+        QPainter pagePainter(viewport());
+        pagePainter.setRenderHint(QPainter::Antialiasing, false);
+
+        // Dashed red pen for the page break marker
+        QPen redPen(QColor(220, 50, 50), 1, Qt::DashLine);
+        pagePainter.setPen(redPen);
+
+        int scrollY = verticalScrollBar()->value();
+        int pageHeight = 1056; // Standard Letter height at 96 DPI
+        qreal docHeight = document()->size().height();
+        int totalHeight = qMax((int)docHeight, viewport()->height() + scrollY);
+
+        // Draw a red line at each page boundary (page 1 end, page 2 end, etc.)
+        for (int y = pageHeight; y < totalHeight + pageHeight; y += pageHeight) {
+            int drawY = y - scrollY;
+            if (drawY >= 0 && drawY <= viewport()->height()) {
+                pagePainter.drawLine(0, drawY, viewport()->width(), drawY);
+
+                // Optional subtle label
+                pagePainter.setPen(QColor(200, 80, 80));
+                pagePainter.drawText(viewport()->width() - 80, drawY - 4, QString("Page Break"));
+                pagePainter.setPen(redPen);
+            }
+        }
+    }
+
+    // 2. Draw Image Resize Handle Box (Existing)
     if (m_selectedImagePos >= 0) {
         QRect imgRect = currentImageRect();
         if (!imgRect.isEmpty()) {

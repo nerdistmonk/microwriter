@@ -462,27 +462,9 @@ void MicroWriter::saveAsFile() {
         "All Files (*.*)"
     });
 
-    QCheckBox *stripBox = new QCheckBox(tr("Strip HTML formatting"), &dialog);
-    stripBox->setChecked(false);
-
-    auto updateStripBox = [stripBox, &dialog]() {
-        QString sel = dialog.selectedNameFilter();
-        stripBox->setEnabled(sel.contains("*.txt"));
-    };
-    updateStripBox();
-    connect(&dialog, &QFileDialog::filterSelected, this, [updateStripBox](const QString &){
-        updateStripBox();
-    });
-
-    QGridLayout *layout = qobject_cast<QGridLayout*>(dialog.layout());
-    if (layout) {
-        layout->addWidget(stripBox, layout->rowCount(), 0, 1, -1);
-    }
-
     if (dialog.exec() == QDialog::Accepted) {
         QString fileName = dialog.selectedFiles().first();
         QString selectedFilter = dialog.selectedNameFilter();
-        bool doStrip = stripBox->isChecked() && selectedFilter.contains("*.txt");
 
         QFileInfo fileInfo(fileName);
         if (fileInfo.suffix().isEmpty()) {
@@ -493,25 +475,12 @@ void MicroWriter::saveAsFile() {
 
         QString newExt = QFileInfo(fileName).suffix().toLower();
 
+        // Code Editor View handling
         if (CodeEditorView *codeEd = dynamic_cast<CodeEditorView*>(editor)) {
             QString bufferText = codeEd->getRawPlainText();
 
             if (newExt == "html" || newExt == "htm") {
                 bufferText = markdownToHtml(bufferText);
-            } else if (newExt == "txt" && doStrip) {
-                QTextDocument tempDoc;
-                if (bufferText.contains("<html", Qt::CaseInsensitive) || bufferText.contains("<!DOCTYPE", Qt::CaseInsensitive) || bufferText.contains("<p>", Qt::CaseInsensitive)) {
-                    tempDoc.setHtml(bufferText);
-                } else {
-                    tempDoc.setPlainText(bufferText);
-                }
-                QString txtOutput = tempDoc.toPlainText();
-                editor->setFilePath(fileName);
-                writeFile(fileName, txtOutput);
-                codeEd->setContent(txtOutput, fileName);
-                tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
-                updateWindowTitleAndStats();
-                return;
             }
 
             editor->setFilePath(fileName);
@@ -522,14 +491,9 @@ void MicroWriter::saveAsFile() {
             return;
         }
 
+        // Rich Editor View (.txt always saves as clean plain text)
         if (newExt == "txt") {
-            QString output;
-            if (doStrip) {
-                output = editor->getRawPlainText();
-            } else {
-                EditorView *richEd = dynamic_cast<EditorView*>(editor);
-                output = richEd ? richEd->toHtml() : editor->getContentForSave();
-            }
+            QString output = editor->getRawPlainText();
             editor->setFilePath(fileName);
             writeFile(fileName, output);
             tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
@@ -537,6 +501,7 @@ void MicroWriter::saveAsFile() {
             return;
         }
 
+        // Rich Editor View default handling (HTML, etc.)
         editor->setFilePath(fileName);
         writeFile(fileName);
         tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
@@ -745,7 +710,7 @@ void MicroWriter::applyLayoutModeToEditor(EditorView *editor, LayoutMode mode) {
         editor->isPrintLayout = true;
         ruler->setVisible(true);
         editor->setStyleSheet(QString("EditorView { background-color: %1; }")
-                                  .arg(darkModeActive ? "#121212" : "#707070"));
+                                 .arg(darkModeActive ? "#121212" : "#707070"));
         frameFmt.setTopMargin(40);
         frameFmt.setBottomMargin(40);
         frameFmt.setLeftMargin(editor->leftMarginPixels() > 0 ? editor->leftMarginPixels() : 40);
@@ -764,6 +729,11 @@ void MicroWriter::applyLayoutModeToEditor(EditorView *editor, LayoutMode mode) {
 
     doc->setModified(wasModified);
     doc->blockSignals(docSignalsBlocked);
+
+    // Force the ruler to update its arrows immediately upon layout mode changes
+    if (ruler && mode != CodeLayout) {
+    ruler->setEditor(editor);
+    }
 }
 
 void MicroWriter::toggleDarkMode(bool dark) {

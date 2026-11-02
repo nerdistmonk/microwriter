@@ -26,10 +26,16 @@ void Ruler::setEditor(EditorView *ed) {
 
 void Ruler::syncWithEditor() {
     if (!editor) return;
+
+    // In PrintLayout, boundary is locked to 816px. In NormalLayout, boundary is the full ruler width.
+    bool isPrint = (editor->isPrintLayout || editor->layoutMode() == PrintLayout);
+    int rightEdge = isPrint ? 816 : width();
+
     leftMarginPos = qRound(editor->leftMarginPixels());
-    rightMarginPos = width() - qRound(editor->rightMarginPixels());
-    leftMarginPos = qBound(0, leftMarginPos, width() - 50);
-    rightMarginPos = qBound(leftMarginPos + 40, rightMarginPos, width() - 5);
+    rightMarginPos = rightEdge - qRound(editor->rightMarginPixels());
+
+    leftMarginPos = qBound(0, leftMarginPos, rightEdge - 50);
+    rightMarginPos = qBound(leftMarginPos + 40, rightMarginPos, rightEdge - 5);
 }
 
 void Ruler::resizeEvent(QResizeEvent *event) {
@@ -89,18 +95,19 @@ void Ruler::mousePressEvent(QMouseEvent *event) {
 }
 
 void Ruler::mouseMoveEvent(QMouseEvent *event) {
+    if (!editor) return;
+
+    bool isPrint = (editor->isPrintLayout || editor->layoutMode() == PrintLayout);
+    int rightEdge = isPrint ? 816 : width();
     int x = event->pos().x();
+
     if (draggingLeft) {
         leftMarginPos = qBound(0, x, rightMarginPos - 40);
-        if (editor) {
-            editor->setLeftMarginPixels(leftMarginPos);
-        }
+        editor->setLeftMarginPixels(leftMarginPos);
         update();
     } else if (draggingRight) {
-        rightMarginPos = qBound(leftMarginPos + 40, x, width() - 5);
-        if (editor) {
-            editor->setRightMarginPixels(width() - rightMarginPos);
-        }
+        rightMarginPos = qBound(leftMarginPos + 40, x, rightEdge - 5);
+        editor->setRightMarginPixels(rightEdge - rightMarginPos);
         update();
     } else {
         if (qAbs(x - leftMarginPos) < 10 || qAbs(x - rightMarginPos) < 10) {

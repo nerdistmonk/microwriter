@@ -27,6 +27,7 @@ A lightweight, distraction-free rich text editor and code notepad built with C++
 
 ---
 ### doc2html is an included extra for converting docx, doc and rtf to html format, it requires libzip and libxml to build.
+### microwriter-fontman is a utility for fetching the font files you used in an html document and saving them into a font folder so you can bundle the fonts you used with the document (docx does this by basically acting like a zip archive), fontman is also able to 'install' fonts from a given folder by using the -i argument (microwriter-fontman -i ./fonts), it will copy the fonts to the .local/share/fonts folder and run fc-cache.
 ---
 ## Keyboard Shortcuts for the Qt6 GUI
 
