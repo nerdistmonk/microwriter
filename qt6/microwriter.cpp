@@ -318,8 +318,9 @@ void MicroWriter::openFilePath(const QString &fileName) {
         content = QString::fromLatin1(rawData);
     } else {
         QTextStream in(&rawData);
-        in.setEncoding(QStringConverter::encodingForName(encName.toUtf8()).value_or(QStringConverter::Utf8));
+        in.setEncoding(QStringConverter::Utf8);
         content = in.readAll();
+        if (rawData.startsWith("\xEF\xBB\xBF")) encName = "Windows UTF-8";
     }
 
     QString ext = QFileInfo(fileName).suffix().toLower();
@@ -591,6 +592,8 @@ bool MicroWriter::writeFile(const QString &fileName, const QString &customConten
     } else {
         QTextStream out(&file);
         out.setEncoding(QStringConverter::encodingForName(editor->encodingName().toUtf8()).value_or(QStringConverter::Utf8));
+        // "Windows UTF-8" is UTF-8 with a byte order mark; the name above falls back to plain UTF-8.
+        if (editor->encodingName() == "Windows UTF-8") out.setGenerateByteOrderMark(true);
         out << content;
         out.flush();
     }

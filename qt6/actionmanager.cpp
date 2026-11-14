@@ -86,7 +86,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
 
     QMenu *encMenu = fileMenu->addMenu(tr("Text &Encoding"));
     QActionGroup *encGrp = new QActionGroup(m_window);
-    for (const QString &enc : {"UTF-8", "UTF-16", "ISO-8859-1", "Windows-1252"}) {
+    for (const QString &enc : {"UTF-8", "Windows UTF-8", "UTF-16", "ISO-8859-1", "Windows-1252"}) {
         QAction *act = new QAction(enc, m_window);
         act->setCheckable(true);
         encGrp->addAction(act);
