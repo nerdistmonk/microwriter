@@ -818,7 +818,7 @@ int showHtmlCheatSheetModal(std::string &outTag) {
         {"Anchor / Link", "<a href=\"\"></a>"},
         {"Image element", "<img src=\"\" alt=\"\" />"},
         {"Unordered List", "<ul>\n  <li></li>\n</ul>"},
-        {"Ordered List", "<ol>\n  <li></li>\n</ul>"},
+        {"Ordered List", "<ol>\n  <li></li>\n</ol>"},
         {"Blockquote", "<blockquote></blockquote>"},
         {"Inline Code", "<code></code>"},
         {"Code Block", "<pre><code></code></pre>"},
