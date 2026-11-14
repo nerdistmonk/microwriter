@@ -59,15 +59,14 @@ public:
         init_pair(7, COLOR_WHITE, COLOR_RED);
         init_pair(8, COLOR_MAGENTA, -1);
 
-        // Code text colours: numbers (9) and bracket depth levels (10-14), foreground only.
+        // Bracket depth levels (pairs 10-14), foreground only.
         // 256-colour terminals get distinct hues; 8-colour ones reuse basic colours.
         const bool wide = COLORS >= 256;
-        init_pair(9, wide ? 208 : COLOR_GREEN, -1);
-        init_pair(10, wide ? 75 : COLOR_RED, -1);
-        init_pair(11, wide ? 114 : COLOR_BLUE, -1);
-        init_pair(12, wide ? 203 : COLOR_WHITE, -1);
-        init_pair(13, wide ? 141 : COLOR_YELLOW, -1);
-        init_pair(14, wide ? 211 : COLOR_CYAN, -1);
+        init_pair(10, wide ? 33 : COLOR_RED, -1);
+        init_pair(11, wide ? 208 : COLOR_BLUE, -1);
+        init_pair(12, wide ? 196 : COLOR_WHITE, -1);
+        init_pair(13, wide ? 135 : COLOR_CYAN, -1);
+        init_pair(14, COLOR_YELLOW, -1);
 
         if (initialFiles.empty()) {
             EditorDocument d;

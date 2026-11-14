@@ -212,7 +212,7 @@ static int scanCodeLine(const std::string &line, int depth, std::vector<chtype> 
                     break;
                 }
             }
-            paint(i, j, COLOR_PAIR(9));
+            paint(i, j, COLOR_PAIR(3));
             i = j;
             continue;
         }
