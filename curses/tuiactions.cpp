@@ -8,6 +8,7 @@
 #include <vector>
 #include <set>
 #include <cstdio>
+#include <csignal>
 #include <regex>
 
 namespace TuiActions {
@@ -19,8 +20,11 @@ static void writeToSystemClipboard(const std::string &text) {
     if (!fp) fp = popen("xclip -selection clipboard 2>/dev/null", "w");
     if (!fp) fp = popen("xsel --clipboard --input 2>/dev/null", "w");
     if (fp) {
+        // the helper may be missing; don't let a write to its closed pipe kill the editor
+        auto oldHandler = std::signal(SIGPIPE, SIG_IGN);
         fwrite(text.data(), 1, text.size(), fp);
         pclose(fp);
+        std::signal(SIGPIPE, oldHandler);
     }
 }
 
