@@ -180,7 +180,8 @@ void insertBlockquote(EditorView *editor) {
         const int selectionEnd = qMax(cursor.selectionStart(), cursor.selectionEnd());
         const QString selected = editor->textCursor().selectedText();
         if (!selected.isEmpty()) {
-            QStringList lines = selected.split('\n');
+            // selectedText() separates paragraphs with U+2029, not '\n'.
+            QStringList lines = selected.split(QChar::ParagraphSeparator);
             for (QString &line : lines) {
                 if (!line.trimmed().isEmpty()) {
                     line.prepend("> ");

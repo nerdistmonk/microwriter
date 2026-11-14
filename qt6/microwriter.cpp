@@ -308,9 +308,19 @@ void MicroWriter::openFilePath(const QString &fileName) {
     else if (rawData.contains('\r') && !rawData.contains('\n')) eol = EolCr;
 
     QString encName = "UTF-8";
-    QTextStream in(&rawData);
-    in.setEncoding(QStringConverter::encodingForName(encName.toUtf8()).value_or(QStringConverter::Utf8));
-    QString content = in.readAll();
+    QString content;
+    QStringDecoder utf8Check(QStringConverter::Utf8, QStringConverter::Flag::Stateless);
+    const QString utf8Probe = utf8Check(rawData);
+    Q_UNUSED(utf8Probe)
+    if (utf8Check.hasError()) {
+        // Not valid UTF-8: read as Latin-1 so every byte survives a save.
+        encName = "ISO-8859-1";
+        content = QString::fromLatin1(rawData);
+    } else {
+        QTextStream in(&rawData);
+        in.setEncoding(QStringConverter::encodingForName(encName.toUtf8()).value_or(QStringConverter::Utf8));
+        content = in.readAll();
+    }
 
     QString ext = QFileInfo(fileName).suffix().toLower();
 
@@ -1016,6 +1026,10 @@ void MicroWriter::removeToolbar(QToolBar *toolbar) {
         QMessageBox::information(this, tr("Cannot Remove"), tr("You must keep at least one toolbar."));
         return;
     }
+
+    // The font/size widgets live inside their toolbar and die with it.
+    if (fontCombo && toolbar->isAncestorOf(fontCombo)) fontCombo = nullptr;
+    if (sizeSpin && toolbar->isAncestorOf(sizeSpin)) sizeSpin = nullptr;
 
     toolbars.removeAll(toolbar);
     removeToolBar(toolbar);

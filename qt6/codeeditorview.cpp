@@ -166,6 +166,7 @@ void BracketHighlighter::highlightBlock(const QString &text) {
             inComment = true;
             commentLength = text.length() - startIndex;
         } else {
+            inComment = false;
             commentLength = endIndex - startIndex + match.capturedLength();
         }
         setFormat(startIndex, commentLength, m_multiLineCommentFormat);
@@ -513,6 +514,19 @@ void CodeEditorView::handleDuplicate() {
     }
 }
 
+// BlockUnderCursor skips empty blocks and the first block, so select the line and one separator explicitly.
+static void removeWholeBlock(const QTextBlock &blk) {
+    QTextCursor c(blk);
+    if (blk.next().isValid()) {
+        c.setPosition(blk.position());
+        c.setPosition(blk.next().position(), QTextCursor::KeepAnchor);
+    } else {
+        c.setPosition(blk.position() - 1);
+        c.setPosition(blk.position() + blk.length() - 1, QTextCursor::KeepAnchor);
+    }
+    c.removeSelectedText();
+}
+
 void CodeEditorView::handleMoveLine(bool moveUp) {
     QTextCursor cursor = textCursor();
     int start = cursor.selectionStart();
@@ -533,9 +547,7 @@ void CodeEditorView::handleMoveLine(bool moveUp) {
         QString prevText = prevBlock.text();
 
         cursor.beginEditBlock();
-        QTextCursor c(prevBlock);
-        c.select(QTextCursor::BlockUnderCursor);
-        c.removeSelectedText();
+        removeWholeBlock(prevBlock);
 
         QTextBlock targetBlock = document()->findBlockByNumber(endBlock - 1);
         QTextCursor insertCursor(targetBlock);
@@ -555,9 +567,7 @@ void CodeEditorView::handleMoveLine(bool moveUp) {
         QString nextText = nextBlock.text();
 
         cursor.beginEditBlock();
-        QTextCursor c(nextBlock);
-        c.select(QTextCursor::BlockUnderCursor);
-        c.removeSelectedText();
+        removeWholeBlock(nextBlock);
 
         QTextBlock targetBlock = document()->findBlockByNumber(startBlock);
         QTextCursor insertCursor(targetBlock);

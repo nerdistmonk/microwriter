@@ -221,8 +221,15 @@ void stripBlankLines(BaseEditor *editor) {
     for (int i = endBlockNum; i >= startBlockNum; --i) {
         QTextBlock blk = doc->findBlockByNumber(i);
         if (blk.isValid() && blk.text().trimmed().isEmpty() && doc->blockCount() > 1) {
-            QTextCursor c(blk);
-            c.select(QTextCursor::BlockUnderCursor);
+            // BlockUnderCursor skips empty blocks and the first block, so select explicitly.
+            QTextCursor c(doc);
+            if (blk.next().isValid()) {
+                c.setPosition(blk.position());
+                c.setPosition(blk.next().position(), QTextCursor::KeepAnchor);
+            } else {
+                c.setPosition(blk.position() - 1);
+                c.setPosition(blk.position() + blk.length() - 1, QTextCursor::KeepAnchor);
+            }
             c.removeSelectedText();
         }
     }
