@@ -481,6 +481,14 @@ void MicroWriter::saveAsFile() {
             if (selectedFilter.contains("*.txt")) fileName += ".txt";
             else if (selectedFilter.contains("*.cpp")) fileName += ".cpp";
             else fileName += ".html";
+
+            // The dialog only checked the name without the added extension.
+            if (QFileInfo::exists(fileName) &&
+                QMessageBox::question(this, tr("Confirm Save As"),
+                    tr("'%1' already exists.\nDo you want to replace it?").arg(QFileInfo(fileName).fileName()),
+                    QMessageBox::Yes | QMessageBox::No, QMessageBox::No) != QMessageBox::Yes) {
+                return;
+            }
         }
 
         QString newExt = QFileInfo(fileName).suffix().toLower();
@@ -493,8 +501,12 @@ void MicroWriter::saveAsFile() {
                 bufferText = markdownToHtml(bufferText);
             }
 
+            const QString oldPath = editor->filePath();
             editor->setFilePath(fileName);
-            writeFile(fileName, bufferText);
+            if (!writeFile(fileName, bufferText)) {
+                editor->setFilePath(oldPath);
+                return;
+            }
             codeEd->setContent(bufferText, fileName);
             tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
             updateWindowTitleAndStats();
@@ -504,16 +516,24 @@ void MicroWriter::saveAsFile() {
         // Rich Editor View (.txt always saves as clean plain text)
         if (newExt == "txt") {
             QString output = editor->getRawPlainText();
+            const QString oldPath = editor->filePath();
             editor->setFilePath(fileName);
-            writeFile(fileName, output);
+            if (!writeFile(fileName, output)) {
+                editor->setFilePath(oldPath);
+                return;
+            }
             tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
             updateWindowTitleAndStats();
             return;
         }
 
         // Rich Editor View default handling (HTML, etc.)
+        const QString oldPath = editor->filePath();
         editor->setFilePath(fileName);
-        writeFile(fileName);
+        if (!writeFile(fileName)) {
+            editor->setFilePath(oldPath);
+            return;
+        }
         tabWidget->setTabText(tabWidget->currentIndex(), QFileInfo(fileName).fileName());
         updateWindowTitleAndStats();
 
@@ -523,19 +543,23 @@ void MicroWriter::saveAsFile() {
     }
 }
 
-void MicroWriter::writeFile(const QString &fileName) {
+bool MicroWriter::writeFile(const QString &fileName) {
     BaseEditor *editor = currentBaseEditor();
-    if (!editor) return;
+    if (!editor) return false;
 
-    writeFile(fileName, editor->getContentForSave());
+    return writeFile(fileName, editor->getContentForSave());
 }
 
-void MicroWriter::writeFile(const QString &fileName, const QString &customContent) {
+bool MicroWriter::writeFile(const QString &fileName, const QString &customContent) {
     BaseEditor *editor = currentBaseEditor();
-    if (!editor) return;
+    if (!editor) return false;
 
     QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly)) return;
+    if (!file.open(QIODevice::WriteOnly)) {
+        QMessageBox::warning(this, tr("Cannot Save"),
+            tr("Could not write '%1':\n%2").arg(fileName, file.errorString()));
+        return false;
+    }
 
     QString content = customContent;
 
@@ -546,6 +570,12 @@ void MicroWriter::writeFile(const QString &fileName, const QString &customConten
     QTextStream out(&file);
     out.setEncoding(QStringConverter::encodingForName(editor->encodingName().toUtf8()).value_or(QStringConverter::Utf8));
     out << content;
+    out.flush();
+    if (!file.flush() || file.error() != QFileDevice::NoError) {
+        QMessageBox::warning(this, tr("Cannot Save"),
+            tr("Could not write '%1':\n%2").arg(fileName, file.errorString()));
+        return false;
+    }
     editor->setModified(false);
 
     int curIdx = tabWidget->currentIndex();
@@ -553,6 +583,7 @@ void MicroWriter::writeFile(const QString &fileName, const QString &customConten
         tabWidget->setTabText(curIdx, QFileInfo(fileName).fileName());
     }
     updateWindowTitleAndStats();
+    return true;
 }
 
 void MicroWriter::closeTabRequested(int index) {

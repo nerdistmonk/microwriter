@@ -469,14 +469,16 @@ void CodeEditorView::handleToggleComment() {
         QString text = blk.text();
 
         if (allCommented) {
-            int idx = text.indexOf(commentMarker);
-            int len = commentMarker.length();
-            if (idx == -1) {
-                QString alt = commentMarker.trimmed();
-                idx = text.indexOf(alt);
-                len = alt.length();
+            // Only the marker that starts the line is removed, not a later one.
+            int idx = 0;
+            while (idx < text.length() && text.at(idx).isSpace()) idx++;
+            int len = 0;
+            if (text.mid(idx).startsWith(commentMarker)) {
+                len = commentMarker.length();
+            } else if (text.mid(idx).startsWith(commentMarker.trimmed())) {
+                len = commentMarker.trimmed().length();
             }
-            if (idx != -1) {
+            if (len > 0) {
                 QTextCursor c(blk);
                 c.setPosition(blk.position() + idx);
                 c.setPosition(blk.position() + idx + len, QTextCursor::KeepAnchor);
@@ -594,6 +596,9 @@ void CodeEditorView::handleIndent() {
     int startBlock = cursor.blockNumber();
     cursor.setPosition(end, QTextCursor::KeepAnchor);
     int endBlock = cursor.blockNumber();
+    if (end > start && cursor.atBlockStart()) {
+        endBlock--;
+    }
 
     for (int i = startBlock; i <= endBlock; ++i) {
         QTextBlock blk = document()->findBlockByNumber(i);
@@ -615,6 +620,9 @@ void CodeEditorView::handleUnindent() {
     int startBlock = cursor.blockNumber();
     cursor.setPosition(end, QTextCursor::KeepAnchor);
     int endBlock = cursor.blockNumber();
+    if (end > start && cursor.atBlockStart()) {
+        endBlock--;
+    }
 
     for (int i = startBlock; i <= endBlock; ++i) {
         QTextBlock blk = document()->findBlockByNumber(i);
