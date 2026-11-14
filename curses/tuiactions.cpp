@@ -134,6 +134,7 @@ void injectTagAroundSelection(EditorDocument &doc, const std::string &openTag, c
         std::string &lastLine = doc.lines[end.line];
         std::string lastSelected = lastLine.substr(0, end.col);
         lastLine.replace(0, end.col, openTag + lastSelected + closeTag);
+        doc.cursor.line = end.line;
         doc.cursor.col = static_cast<int>(openTag.length() + lastSelected.length() + closeTag.length());
     }
 
