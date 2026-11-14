@@ -223,7 +223,7 @@ static int scanCodeLine(const std::string &line, int depth, std::vector<chtype> 
                 j++;
             }
             if (keywords.count(line.substr(i, j - i))) {
-                paint(i, j, COLOR_PAIR(1) | A_BOLD);
+                paint(i, j, COLOR_PAIR(8) | A_BOLD);
             }
             i = j;
             continue;
