@@ -197,6 +197,9 @@ private:
                 }
             }
             doc().lines = wrapped.empty() ? std::vector<std::string>{""} : wrapped;
+            doc().cursor.line = std::min(doc().cursor.line, static_cast<int>(doc().lines.size()) - 1);
+            doc().cursor.col = std::min(doc().cursor.col, static_cast<int>(doc().lines[doc().cursor.line].length()));
+            doc().hasSelection = false;
             doc().modified = true;
         }
     }
@@ -259,12 +262,7 @@ private:
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
         }
 
-        static const std::vector<std::string> codeExts = {
-            "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
-            "xml", "sh", "bash", "ini", "cfg", "conf", "yaml", "yml", "cmake", "txt",
-            "md", "markdown"
-        };
-        if (m_defaultCodeMode || std::find(codeExts.begin(), codeExts.end(), ext) != codeExts.end()) {
+        if (m_defaultCodeMode || (ext != "html" && ext != "htm")) {
             d.mode = TuiMode::Code;
         } else {
             d.mode = TuiMode::RichText;
@@ -406,7 +404,9 @@ private:
 
     void exportDocument(const std::string &extLabel, const std::string &defaultExt) {
         std::string defName = doc().filePath.empty() ? ("untitled." + defaultExt) : doc().title + "." + defaultExt;
-        std::string target = TuiDialogs::showPromptModal("Export to " + extLabel + " (" + defName + "): ");
+        bool cancelled = false;
+        std::string target = TuiDialogs::showPromptModal("Export to " + extLabel + " (" + defName + "): ", &cancelled);
+        if (cancelled) return;
         if (target.empty()) target = defName;
 
         std::ofstream out(target, std::ios::binary);
@@ -438,6 +438,8 @@ private:
                 m_activeDocIdx = index;
                 saveCurrentFile();
                 m_activeDocIdx = oldActive;
+                // Save failed or Save As was cancelled; keep the tab so nothing is lost
+                if (m_documents[index].modified) return;
             } else if (res == 0) {
                 return;
             }
@@ -448,6 +450,8 @@ private:
             if (m_defaultCodeMode) d.mode = TuiMode::Code;
             m_documents.push_back(d);
             m_activeDocIdx = 0;
+        } else if (index < m_activeDocIdx) {
+            m_activeDocIdx--;
         } else if (m_activeDocIdx >= m_documents.size()) {
             m_activeDocIdx = m_documents.size() - 1;
         }
@@ -464,8 +468,23 @@ private:
         }
         int res = TuiDialogs::showConfirmModal("Quit MicroWriter", "You have unsaved changes. Save before quitting?");
         if (res == 1) {
-            saveCurrentFile();
-            m_running = false;
+            const size_t oldActive = m_activeDocIdx;
+            bool allSaved = true;
+            for (size_t i = 0; i < m_documents.size(); ++i) {
+                if (!m_documents[i].modified) continue;
+                m_activeDocIdx = i;
+                saveCurrentFile();
+                // A cancelled Save As or failed write leaves the document modified.
+                if (m_documents[i].modified) {
+                    allSaved = false;
+                    break;
+                }
+            }
+            if (allSaved) {
+                m_activeDocIdx = oldActive;
+                m_running = false;
+            }
+            // On failure, stay on the document that could not be saved.
         } else if (res == 2) {
             m_running = false;
         }

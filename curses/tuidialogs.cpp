@@ -25,7 +25,8 @@ static void drawDialogBorder(WINDOW *win, int height, int width) {
     wprintw(win, "\xe2\x94\x98");
 }
 
-std::string showPromptModal(const std::string &prompt) {
+std::string showPromptModal(const std::string &prompt, bool *cancelled) {
+    if (cancelled) *cancelled = false;
     int width = 54;
     int height = 5;
     int startY = (LINES - height) / 2;
@@ -66,6 +67,7 @@ std::string showPromptModal(const std::string &prompt) {
 
         if (ch == 27) {
             delwin(win);
+            if (cancelled) *cancelled = true;
             return "";
         }
 

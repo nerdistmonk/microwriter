@@ -56,6 +56,20 @@ static bool rangeOverlapsTag(const std::string &line, size_t pos, size_t len) {
     return false;
 }
 
+// Ordered selection range clamped to the current buffer; line-reshaping actions can leave the anchor/cursor stale.
+static void orderedClampedSelection(const EditorDocument &doc, TextPosition &start, TextPosition &end) {
+    start = doc.selectionAnchor;
+    end = doc.cursor;
+    if (end < start) std::swap(start, end);
+
+    const int lastLine = static_cast<int>(doc.lines.size()) - 1;
+    start.line = std::clamp(start.line, 0, lastLine);
+    end.line = std::clamp(end.line, 0, lastLine);
+    start.col = std::clamp(start.col, 0, static_cast<int>(doc.lines[start.line].length()));
+    end.col = std::clamp(end.col, 0, static_cast<int>(doc.lines[end.line].length()));
+    if (end < start) end = start;
+}
+
 static std::vector<std::string> querySystemFonts() {
     std::set<std::string> uniqueFonts;
     FILE *fp = popen("fc-list : family 2>/dev/null", "r");
@@ -99,9 +113,8 @@ void injectTagAroundSelection(EditorDocument &doc, const std::string &openTag, c
         return;
     }
 
-    TextPosition start = doc.selectionAnchor;
-    TextPosition end = doc.cursor;
-    if (end < start) std::swap(start, end);
+    TextPosition start, end;
+    orderedClampedSelection(doc, start, end);
 
     if (start.line == end.line) {
         std::string &line = doc.lines[start.line];
@@ -365,9 +378,8 @@ void handleCutCopy(EditorDocument &doc, bool isCut) {
         return;
     }
 
-    TextPosition start = doc.selectionAnchor;
-    TextPosition end = doc.cursor;
-    if (end < start) std::swap(start, end);
+    TextPosition start, end;
+    orderedClampedSelection(doc, start, end);
 
     if (start.line == end.line) {
         s_clipboard = doc.lines[start.line].substr(start.col, end.col - start.col);
@@ -463,6 +475,7 @@ void handleUndo(EditorDocument &doc) {
     doc.undoStack.pop_back();
     doc.lines = snap.lines;
     doc.cursor = snap.cursor;
+    doc.hasSelection = false;
     doc.modified = true;
 }
 
@@ -473,6 +486,7 @@ void handleRedo(EditorDocument &doc) {
     doc.redoStack.pop_back();
     doc.lines = snap.lines;
     doc.cursor = snap.cursor;
+    doc.hasSelection = false;
     doc.modified = true;
 }
 
@@ -688,9 +702,8 @@ void handleToggleComment(EditorDocument &doc) {
 void handleDuplicate(EditorDocument &doc) {
     doc.pushUndo();
     if (doc.hasSelection) {
-        TextPosition start = doc.selectionAnchor;
-        TextPosition end = doc.cursor;
-        if (end < start) std::swap(start, end);
+        TextPosition start, end;
+        orderedClampedSelection(doc, start, end);
 
         std::string selText;
         if (start.line == end.line) {
@@ -912,9 +925,7 @@ void handleSpellCheck(EditorDocument &doc) {
     TextPosition wordStart, wordEnd;
 
     if (doc.hasSelection) {
-        wordStart = doc.selectionAnchor;
-        wordEnd = doc.cursor;
-        if (wordEnd < wordStart) std::swap(wordStart, wordEnd);
+        orderedClampedSelection(doc, wordStart, wordEnd);
         if (wordStart.line == wordEnd.line) {
             word = doc.lines[wordStart.line].substr(wordStart.col, wordEnd.col - wordStart.col);
         }

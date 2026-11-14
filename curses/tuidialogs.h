@@ -5,7 +5,7 @@
 #include <vector>
 
 namespace TuiDialogs {
-std::string showPromptModal(const std::string &prompt);
+std::string showPromptModal(const std::string &prompt, bool *cancelled = nullptr);
 int showListSelectionModal(const std::string &title, const std::vector<std::string> &items);
 void showAboutModal();
 bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace);
