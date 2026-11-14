@@ -247,7 +247,11 @@ void insertLink(EditorView *editor, QWidget *parent) {
         QString url = dlg.url();
         QString text = dlg.linkText().isEmpty() ? url : dlg.linkText();
         if (!url.isEmpty()) {
+            const QTextCharFormat typingFormat = editor->currentCharFormat();
             cursor.insertHtml(QString("<a href=\"%1\">%2</a>").arg(url, text));
+            // Without this, text typed right after the link becomes part of it.
+            editor->setTextCursor(cursor);
+            editor->setCurrentCharFormat(typingFormat);
         }
     }
 }
