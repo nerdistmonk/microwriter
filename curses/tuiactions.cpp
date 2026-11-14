@@ -721,6 +721,8 @@ void handleDuplicate(EditorDocument &doc) {
             std::string line;
             std::vector<std::string> dupLines;
             while (std::getline(ss, line)) dupLines.push_back(line);
+            // getline drops the trailing empty piece when the selection ends at column 0
+            if (selText.back() == '\n') dupLines.push_back("");
 
             std::string cur = doc.lines[end.line];
             std::string prefix = cur.substr(0, end.col);
