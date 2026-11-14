@@ -393,7 +393,12 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malfo
             if (rawContent.compare(nextTag, 4, "<ol>", 4) == 0 || rawContent.compare(nextTag, 4, "<ol ", 4) == 0) {
                 insideOl = true;
                 currentOlNum = 1;
-                pos = rawContent.find('>', nextTag) + 1;
+                size_t tagEnd = rawContent.find('>', nextTag);
+                if (tagEnd == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
+                pos = tagEnd + 1;
                 continue;
             }
             if (rawContent.compare(nextTag, 5, "</ol>", 5) == 0) {
@@ -403,7 +408,12 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malfo
             }
             if (rawContent.compare(nextTag, 4, "<ul>", 4) == 0 || rawContent.compare(nextTag, 4, "<ul ", 4) == 0) {
                 insideOl = false;
-                pos = rawContent.find('>', nextTag) + 1;
+                size_t tagEnd = rawContent.find('>', nextTag);
+                if (tagEnd == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
+                pos = tagEnd + 1;
                 continue;
             }
             if (rawContent.compare(nextTag, 5, "</ul>", 5) == 0) {
@@ -510,7 +520,12 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malfo
                 continue;
             }
             if (rawContent.compare(nextTag, 4, "<tr>", 4) == 0 || rawContent.compare(nextTag, 4, "<tr ", 4) == 0) {
-                pos = rawContent.find('>', nextTag) + 1;
+                size_t tagEnd = rawContent.find('>', nextTag);
+                if (tagEnd == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
+                pos = tagEnd + 1;
                 continue;
             }
             if (rawContent.compare(nextTag, 5, "</tr>", 5) == 0) {
@@ -518,7 +533,12 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malfo
                 continue;
             }
             if (rawContent.compare(nextTag, 4, "<td>", 4) == 0 || rawContent.compare(nextTag, 4, "<td ", 4) == 0) {
-                pos = rawContent.find('>', nextTag) + 1;
+                size_t tagEnd = rawContent.find('>', nextTag);
+                if (tagEnd == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
+                pos = tagEnd + 1;
                 continue;
             }
             if (rawContent.compare(nextTag, 5, "</td>", 5) == 0) {

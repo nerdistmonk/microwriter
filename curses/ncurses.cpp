@@ -18,6 +18,8 @@
 #include <chrono>
 #include <thread>
 #include <regex>
+#include <filesystem>
+#include <system_error>
 
 static const std::vector<std::string> g_tuiStrictCodeExts = {
     "cpp", "c", "h", "hpp", "cc", "cxx", "py", "js", "ts", "json", "css",
@@ -284,8 +286,10 @@ private:
                 bool malformed = false;
                 TuiConverter::deserializeRawToRich(d, rawContent, &malformed);
                 if (malformed) {
-                    TuiDialogs::showMessageModal("Cannot Open File", d.title + ": unclosed <p> or <li> tag. File not opened.");
-                    return false;
+                    if (!TuiDialogs::showMessageChoiceModal("Cannot Open File", d.title + ": incomplete HTML (unclosed <p>, <li>, <ol>, <ul>, <tr> or <td>)", "Rename to .txt and open")) {
+                        return false;
+                    }
+                    return renameToTxtAndLoad(path);
                 }
             } else {
                 std::stringstream ss(rawContent);
@@ -300,6 +304,22 @@ private:
 
         m_documents.push_back(d);
         return true;
+    }
+
+    // Renames path's extension to .txt (never overwriting) and opens it as plain text
+    bool renameToTxtAndLoad(const std::string &path) {
+        std::string newPath = path.substr(0, path.find_last_of('.')) + ".txt";
+        std::error_code ec;
+        if (std::filesystem::exists(newPath, ec)) {
+            TuiDialogs::showMessageModal("Rename Failed", "A file named " + newPath + " already exists.");
+            return false;
+        }
+        std::filesystem::rename(path, newPath, ec);
+        if (ec) {
+            TuiDialogs::showMessageModal("Rename Failed", "Could not rename file: " + ec.message());
+            return false;
+        }
+        return loadFile(newPath);
     }
 
     void triggerSaveFlash() {

@@ -169,6 +169,34 @@ void showMessageModal(const std::string &title, const std::string &message) {
     delwin(win);
 }
 
+bool showMessageChoiceModal(const std::string &title, const std::string &message, const std::string &altLabel) {
+    int width = std::max(56, std::min(COLS - 4, static_cast<int>(message.length()) + 8));
+    int height = 7;
+    int startY = (LINES - height) / 2;
+    int startX = (COLS - width) / 2;
+
+    WINDOW *win = newwin(height, width, startY, startX);
+    wbkgd(win, COLOR_PAIR(6));
+    keypad(win, TRUE);
+    drawDialogBorder(win, height, width);
+
+    std::string buttons = "[Enter] OK    [R] " + altLabel;
+    int maxText = width - 4;
+    mvwprintw(win, 1, std::max(1, (width - static_cast<int>(title.length())) / 2), "%.*s", maxText, title.c_str());
+    mvwprintw(win, 3, std::max(2, (width - static_cast<int>(message.length())) / 2), "%.*s", maxText, message.c_str());
+    mvwprintw(win, 5, std::max(2, (width - static_cast<int>(buttons.length())) / 2), "%.*s", maxText, buttons.c_str());
+    wrefresh(win);
+
+    bool alt = false;
+    while (true) {
+        int ch = wgetch(win);
+        if (ch == 'r' || ch == 'R') { alt = true; break; }
+        if (ch == 10 || ch == KEY_ENTER || ch == 27 || ch == ' ') break;
+    }
+    delwin(win);
+    return alt;
+}
+
 static void updateExtensionForFormat(std::string &name, int newFmt) {
     std::string targetExt = (newFmt == 1) ? ".txt" : ".html";
 

@@ -7,6 +7,7 @@
 namespace TuiDialogs {
 std::string showPromptModal(const std::string &prompt, bool *cancelled = nullptr);
 void showMessageModal(const std::string &title, const std::string &message); // OK-only notice
+bool showMessageChoiceModal(const std::string &title, const std::string &message, const std::string &altLabel); // true if the alternate button was chosen
 int showListSelectionModal(const std::string &title, const std::vector<std::string> &items);
 void showAboutModal();
 bool showFindReplaceModal(std::string &findStr, std::string &replaceStr, bool &doReplace);
