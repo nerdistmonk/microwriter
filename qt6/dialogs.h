@@ -4,6 +4,8 @@
 #include <QDialog>
 #include <QString>
 #include <QList>
+#include <QRegularExpression>
+#include <QTextDocument>
 #include <Qt>
 
 class QTextEdit;
@@ -87,6 +89,9 @@ private:
     QLineEdit *findInput;
     QLineEdit *replaceInput;
     QCheckBox *regexCheckBox;
+    QCheckBox *matchCaseCheckBox;
+    QRegularExpression buildRegex(const QString &pattern) const;
+    QTextDocument::FindFlags findFlags() const;
 };
 
 class RegexHelpDialog : public QDialog {

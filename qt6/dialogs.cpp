@@ -198,7 +198,15 @@ FindReplaceDialog::FindReplaceDialog(BaseEditor *ed, QWidget *parent) : QDialog(
     mainLayout->addLayout(replaceLayout);
 
     regexCheckBox = new QCheckBox("Use Regular Expressions", this);
-    mainLayout->addWidget(regexCheckBox);
+    matchCaseCheckBox = new QCheckBox("Match case", this);
+    QHBoxLayout *optionsLayout = new QHBoxLayout();
+    optionsLayout->addWidget(regexCheckBox);
+    optionsLayout->addWidget(matchCaseCheckBox);
+    mainLayout->addLayout(optionsLayout);
+
+    // Regex replacements have always been case-sensitive and plain ones case-insensitive,
+    // so toggling regex mode sets Match case to that mode's original behaviour.
+    connect(regexCheckBox, &QCheckBox::toggled, matchCaseCheckBox, &QCheckBox::setChecked);
 
     QHBoxLayout *btnLayout = new QHBoxLayout();
     QPushButton *findBtn = new QPushButton("Find Next", this);
@@ -221,21 +229,31 @@ void FindReplaceDialog::setPattern(const QString &findText, const QString &repla
     regexCheckBox->setChecked(useRegex);
 }
 
+QRegularExpression FindReplaceDialog::buildRegex(const QString &pattern) const {
+    QRegularExpression re(pattern);
+    if (!matchCaseCheckBox->isChecked()) re.setPatternOptions(QRegularExpression::CaseInsensitiveOption);
+    return re;
+}
+
+QTextDocument::FindFlags FindReplaceDialog::findFlags() const {
+    return matchCaseCheckBox->isChecked() ? QTextDocument::FindCaseSensitively : QTextDocument::FindFlags();
+}
+
 void FindReplaceDialog::findNext() {
     QString query = findInput->text();
     if (query.isEmpty() || !editor) return;
 
     if (regexCheckBox->isChecked()) {
-        QRegularExpression re(query);
+        QRegularExpression re = buildRegex(query);
         if (!re.isValid()) return;
-        if (!editor->findRegExp(re)) {
+        if (!editor->findRegExp(re, findFlags())) {
             editor->moveCursor(QTextCursor::Start);
-            editor->findRegExp(re);
+            editor->findRegExp(re, findFlags());
         }
     } else {
-        if (!editor->findText(query)) {
+        if (!editor->findText(query, findFlags())) {
             editor->moveCursor(QTextCursor::Start);
-            editor->findText(query);
+            editor->findText(query, findFlags());
         }
     }
 }
@@ -245,7 +263,7 @@ void FindReplaceDialog::replaceCurrent() {
     QTextCursor cursor = editor->textCursor();
     if (cursor.hasSelection()) {
         if (regexCheckBox->isChecked()) {
-            QRegularExpression re(findInput->text());
+            QRegularExpression re = buildRegex(findInput->text());
             QString selected = cursor.selectedText();
             selected.replace(re, replaceInput->text());
             cursor.insertText(selected);
@@ -270,13 +288,13 @@ void FindReplaceDialog::replaceAll() {
     const int maxReplacements = 100000;
 
     if (regexCheckBox->isChecked()) {
-        QRegularExpression re(query);
+        QRegularExpression re = buildRegex(query);
         if (!re.isValid()) {
             cursor.endEditBlock();
             return;
         }
 
-        while (editor->findRegExp(re)) {
+        while (editor->findRegExp(re, findFlags())) {
             QTextCursor c = editor->textCursor();
             QString selected = c.selectedText();
 
@@ -295,7 +313,7 @@ void FindReplaceDialog::replaceAll() {
             if (++count >= maxReplacements) break;
         }
     } else {
-        while (editor->findText(query)) {
+        while (editor->findText(query, findFlags())) {
             QTextCursor c = editor->textCursor();
             if (c.selectedText().isEmpty()) {
                 if (!c.movePosition(QTextCursor::NextCharacter)) {
