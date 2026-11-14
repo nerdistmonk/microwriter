@@ -124,7 +124,7 @@ static int scanCodeLine(const std::string &line, int depth, std::vector<chtype> 
         "let", "var", "true", "false", "nullptr", "NULL"
     };
 
-    static const int bracketColorPairs[5] = {3, 4, 1, 2, 6};
+    static const int bracketColorPairs[5] = {10, 11, 12, 13, 14};
 
     if (attrs) attrs->assign(line.size(), 0);
     auto paint = [&](size_t from, size_t to, chtype attr) {
@@ -212,7 +212,7 @@ static int scanCodeLine(const std::string &line, int depth, std::vector<chtype> 
                     break;
                 }
             }
-            paint(i, j, COLOR_PAIR(2));
+            paint(i, j, COLOR_PAIR(9));
             i = j;
             continue;
         }
