@@ -505,9 +505,10 @@ static bool findNextRegex(EditorDocument &doc, const std::string &findStr, size_
         if (startCol > line.length()) continue;
 
         if (isRegex) {
-            std::smatch m;
             std::string sub = line.substr(startCol);
-            if (std::regex_search(sub, m, reg)) {
+            // keep scanning past matches that fall inside tags instead of abandoning the line
+            for (std::sregex_iterator it(sub.begin(), sub.end(), reg), endIt; it != endIt; ++it) {
+                const std::smatch &m = *it;
                 size_t matchPos = startCol + m.position(0);
                 size_t matchLen = m.length(0);
                 if (doc.mode != TuiMode::RichText || !rangeOverlapsTag(line, matchPos, matchLen)) {
@@ -550,9 +551,10 @@ static bool replaceNextRegex(EditorDocument &doc, const std::string &findStr, co
         if (startCol > line.length()) continue;
 
         if (isRegex) {
-            std::smatch m;
             std::string sub = line.substr(startCol);
-            if (std::regex_search(sub, m, reg)) {
+            // keep scanning past matches that fall inside tags instead of abandoning the line
+            for (std::sregex_iterator it(sub.begin(), sub.end(), reg), endIt; it != endIt; ++it) {
+                const std::smatch &m = *it;
                 size_t matchPos = startCol + m.position(0);
                 size_t matchLen = m.length(0);
                 if (doc.mode != TuiMode::RichText || !rangeOverlapsTag(line, matchPos, matchLen)) {
