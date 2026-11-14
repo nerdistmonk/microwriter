@@ -62,6 +62,11 @@ public:
             m_documents.push_back(d);
         } else {
             for (const auto &file : initialFiles) loadFile(file);
+            if (m_documents.empty()) {
+                EditorDocument d;
+                if (m_defaultCodeMode) d.mode = TuiMode::Code;
+                m_documents.push_back(d);
+            }
         }
 
         m_activeDocIdx = 0;
@@ -249,7 +254,8 @@ private:
         doc().modified = prevModified;
     }
 
-    void loadFile(const std::string &path) {
+    // Returns false if the file was refused (malformed HTML) and no document was added
+    bool loadFile(const std::string &path) {
         EditorDocument d;
         d.filePath = path;
         size_t lastSlash = path.find_last_of("/\\");
@@ -275,7 +281,12 @@ private:
             if (rawContent.find("\r\n") != std::string::npos) d.eolFormat = "CRLF";
 
             if (d.mode == TuiMode::RichText) {
-                TuiConverter::deserializeRawToRich(d, rawContent);
+                bool malformed = false;
+                TuiConverter::deserializeRawToRich(d, rawContent, &malformed);
+                if (malformed) {
+                    TuiDialogs::showMessageModal("Cannot Open File", d.title + ": unclosed <p> or <li> tag. File not opened.");
+                    return false;
+                }
             } else {
                 std::stringstream ss(rawContent);
                 std::string line;
@@ -288,6 +299,7 @@ private:
         }
 
         m_documents.push_back(d);
+        return true;
     }
 
     void triggerSaveFlash() {
@@ -423,8 +435,7 @@ private:
         int filterType = 0;
         if (TuiDialogs::showOpenFileModal(p, filterType)) {
             if (!p.empty()) {
-                loadFile(p);
-                m_activeDocIdx = m_documents.size() - 1;
+                if (loadFile(p)) m_activeDocIdx = m_documents.size() - 1;
             }
         }
     }

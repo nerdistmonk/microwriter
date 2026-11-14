@@ -18,7 +18,8 @@ std::string serializeLinesToPlainText(const std::vector<std::string> &lines);
 
 // Full document serialization & deserialization
 std::string serializeDocToRaw(const EditorDocument &d);
-void deserializeRawToRich(EditorDocument &d, std::string rawContent);
+// If malformed is given, it is set when an HTML <p> or <li> is unclosed or runs into the next one
+void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malformed = nullptr);
 
 } // namespace TuiConverter
 

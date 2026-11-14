@@ -341,7 +341,8 @@ std::string serializeDocToRaw(const EditorDocument &d) {
     return out.str();
 }
 
-void deserializeRawToRich(EditorDocument &d, std::string rawContent) {
+void deserializeRawToRich(EditorDocument &d, std::string rawContent, bool *malformed) {
+    if (malformed) *malformed = false;
     std::string ext = "";
     size_t dot = d.filePath.find_last_of('.');
     if (dot != std::string::npos) {
@@ -530,9 +531,15 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent) {
                 size_t closeTag = rawContent.find('>', nextTag);
                 if (closeTag == std::string::npos) break;
                 size_t endP = rawContent.find("</p>", closeTag);
-                if (endP == std::string::npos) break;
+                if (endP == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
 
                 std::string lineContent = rawContent.substr(closeTag + 1, endP - closeTag - 1);
+                if (lineContent.find("<p>") != std::string::npos || lineContent.find("<p ") != std::string::npos) {
+                    if (malformed) *malformed = true;
+                }
                 if (lineContent == "<br />" || lineContent == "<br>" || lineContent == "<br/>") {
                     d.lines.push_back("");
                 } else {
@@ -547,9 +554,17 @@ void deserializeRawToRich(EditorDocument &d, std::string rawContent) {
                 size_t closeTag = rawContent.find('>', nextTag);
                 if (closeTag == std::string::npos) break;
                 size_t endLi = rawContent.find("</li>", closeTag);
-                if (endLi == std::string::npos) break;
+                if (endLi == std::string::npos) {
+                    if (malformed) *malformed = true;
+                    break;
+                }
 
                 std::string liContent = rawContent.substr(closeTag + 1, endLi - closeTag - 1);
+                // a <li> inside this one is only legitimate when it belongs to a nested list
+                if ((liContent.find("<li>") != std::string::npos || liContent.find("<li ") != std::string::npos) &&
+                    liContent.find("<ul") == std::string::npos && liContent.find("<ol") == std::string::npos) {
+                    if (malformed) *malformed = true;
+                }
                 if (insideOl) {
                     d.lines.push_back(std::to_string(currentOlNum++) + ". " + liContent);
                 } else {
