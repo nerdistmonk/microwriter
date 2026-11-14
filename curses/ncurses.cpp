@@ -245,7 +245,14 @@ private:
                 if (i + 1 < doc().lines.size()) ss << "\n";
             }
             std::string rawBuffer = ss.str();
-            TuiConverter::deserializeRawToRich(doc(), rawBuffer);
+            std::vector<std::string> savedLines = doc().lines;
+            bool malformed = false;
+            TuiConverter::deserializeRawToRich(doc(), rawBuffer, &malformed);
+            if (malformed) {
+                doc().lines = savedLines;
+                TuiDialogs::showMessageModal("Cannot Switch Mode", "Incomplete HTML (unclosed <p>, <li>, <ol>, <ul>, <tr> or <td>)");
+                return;
+            }
             doc().mode = TuiMode::RichText;
         }
 
