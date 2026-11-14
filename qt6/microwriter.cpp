@@ -567,10 +567,33 @@ bool MicroWriter::writeFile(const QString &fileName, const QString &customConten
     if (editor->eolFormat() == EolCrlf) content.replace('\n', "\r\n");
     else if (editor->eolFormat() == EolCr) content.replace('\n', "\r");
 
-    QTextStream out(&file);
-    out.setEncoding(QStringConverter::encodingForName(editor->encodingName().toUtf8()).value_or(QStringConverter::Utf8));
-    out << content;
-    out.flush();
+    // QStringConverter::encodingForName() does not know Windows-1252 and would fall back to UTF-8.
+    QStringEncoder cp1252Encoder("windows-1252");
+    if (editor->encodingName().compare("Windows-1252", Qt::CaseInsensitive) == 0 && cp1252Encoder.isValid()) {
+        // Non-UTF-8 files are opened as Latin-1, so bytes 0x80-0x9F arrive as U+0080-U+009F.
+        // Write those back unchanged instead of letting the encoder replace them.
+        QByteArray bytes;
+        QString run;
+        auto flushRun = [&]() {
+            if (!run.isEmpty()) bytes += cp1252Encoder(run);
+            run.clear();
+        };
+        for (const QChar ch : std::as_const(content)) {
+            if (ch.unicode() >= 0x80 && ch.unicode() <= 0x9F) {
+                flushRun();
+                bytes.append(static_cast<char>(ch.unicode()));
+            } else {
+                run += ch;
+            }
+        }
+        flushRun();
+        file.write(bytes);
+    } else {
+        QTextStream out(&file);
+        out.setEncoding(QStringConverter::encodingForName(editor->encodingName().toUtf8()).value_or(QStringConverter::Utf8));
+        out << content;
+        out.flush();
+    }
     if (!file.flush() || file.error() != QFileDevice::NoError) {
         QMessageBox::warning(this, tr("Cannot Save"),
             tr("Could not write '%1':\n%2").arg(fileName, file.errorString()));
