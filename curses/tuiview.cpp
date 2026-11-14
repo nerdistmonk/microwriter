@@ -106,16 +106,14 @@ static void printCharWithSelection(int screenY, int screenX, char ch, bool selec
     if (baseAttr) attroff(baseAttr);
 }
 
-static void highlightCodeLine(
-    int screenY,
-    int startX,
-    const std::string &line,
-    int colOffset,
-    int logicalLine,
-    const std::function<bool(int, int)> &isSelected,
-    int initialBracketDepth,
-    int lastNonSpace
-) {
+// Classifies a whole logical line, so colours never depend on which part of it
+// is on screen. Fills attrs (if given) with one attribute per character and
+// returns the bracket depth after the line.
+static int scanCodeLine(const std::string &line, int depth, std::vector<chtype> *attrs) {
+    if (!attrs && line.find_first_of("([{)]}") == std::string::npos) {
+        return depth;
+    }
+
     static const std::unordered_set<std::string> keywords = {
         "char", "class", "const", "double", "enum", "explicit", "friend", "inline",
         "int", "long", "namespace", "operator", "private", "protected", "public",
@@ -128,101 +126,129 @@ static void highlightCodeLine(
 
     static const int bracketColorPairs[5] = {3, 4, 1, 2, 6};
 
-    int depth = initialBracketDepth;
+    if (attrs) attrs->assign(line.size(), 0);
+    auto paint = [&](size_t from, size_t to, chtype attr) {
+        if (!attrs) return;
+        for (size_t k = from; k < to; ++k) (*attrs)[k] = attr;
+    };
+    auto isWordChar = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
+
+    const size_t lastNonSpace = line.find_last_not_of(" \t");
     size_t i = 0;
 
-    while (i < line.length() && startX + static_cast<int>(i) < COLS) {
-        bool isTrailing = (colOffset + static_cast<int>(i) > lastNonSpace || lastNonSpace == std::string::npos) && 
-                          (line[i] == ' ' || line[i] == '\t');
+    while (i < line.length()) {
+        const char c = line[i];
+        const bool isTrailing = (lastNonSpace == std::string::npos || i > lastNonSpace) &&
+                                (c == ' ' || c == '\t');
 
         if (isTrailing) {
-            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
-            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(7));
+            paint(i, i + 1, COLOR_PAIR(7));
             i++;
             continue;
         }
 
-        if (i + 1 < line.length() && line[i] == '/' && line[i + 1] == '/') {
-            for (size_t k = i; k < line.length() && startX + static_cast<int>(k) < COLS; ++k) {
-                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
-                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(4) | A_DIM);
-            }
-            break;
-        }
-        if (line[i] == '#') {
-            for (size_t k = i; k < line.length() && startX + static_cast<int>(k) < COLS; ++k) {
-                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
-                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(4) | A_DIM);
-            }
+        if ((c == '/' && i + 1 < line.length() && line[i + 1] == '/') || c == '#') {
+            paint(i, line.length(), COLOR_PAIR(4) | A_DIM);
             break;
         }
 
-        if (line[i] == '"' || line[i] == '\'') {
-            char q = line[i];
+        if (c == '"' || c == '\'') {
             size_t j = i + 1;
+            bool closed = false;
             while (j < line.length()) {
-                if (line[j] == q && line[j - 1] != '\\') {
+                if (line[j] == '\\') {
+                    j += 2;
+                    continue;
+                }
+                if (line[j] == c) {
+                    closed = true;
                     j++;
                     break;
                 }
                 j++;
             }
-            for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
-                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(3));
+            if (closed) {
+                paint(i, j, COLOR_PAIR(3));
+                i = j;
+            } else {
+                // A quote with no partner (an apostrophe, say) is just a character.
+                i++;
             }
-            i = j;
             continue;
         }
 
-        if (line[i] == '(' || line[i] == '{' || line[i] == '[') {
-            int pairIdx = bracketColorPairs[depth % 5];
-            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
-            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(pairIdx) | A_BOLD);
+        if (c == '(' || c == '{' || c == '[') {
+            paint(i, i + 1, COLOR_PAIR(bracketColorPairs[depth % 5]) | A_BOLD);
             depth++;
             i++;
             continue;
         }
-        if (line[i] == ')' || line[i] == '}' || line[i] == ']') {
+        if (c == ')' || c == '}' || c == ']') {
             depth = std::max(0, depth - 1);
-            int pairIdx = bracketColorPairs[depth % 5];
-            bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
-            printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, COLOR_PAIR(pairIdx) | A_BOLD);
+            paint(i, i + 1, COLOR_PAIR(bracketColorPairs[depth % 5]) | A_BOLD);
             i++;
             continue;
         }
 
-        if (std::isdigit(static_cast<unsigned char>(line[i])) || (line[i] == '-' && i + 1 < line.length() && std::isdigit(static_cast<unsigned char>(line[i + 1])))) {
+        // A leading '-' belongs to the number only when it isn't subtracting from a name or bracket.
+        const bool signedNumber = c == '-' && i + 1 < line.length() &&
+            std::isdigit(static_cast<unsigned char>(line[i + 1])) &&
+            (i == 0 || !(isWordChar(line[i - 1]) || line[i - 1] == ')' || line[i - 1] == ']'));
+
+        if (std::isdigit(static_cast<unsigned char>(c)) || signedNumber) {
+            const size_t digits = signedNumber ? i + 1 : i;
+            const bool hex = line[digits] == '0' && digits + 1 < line.length() &&
+                             (line[digits + 1] == 'x' || line[digits + 1] == 'X');
             size_t j = i + 1;
-            while (j < line.length() && (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '.')) {
+            while (j < line.length()) {
+                if (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '.') {
+                    j++;
+                } else if (line[j] == '-' && !hex && (line[j - 1] == 'e' || line[j - 1] == 'E') &&
+                           j + 1 < line.length() && std::isdigit(static_cast<unsigned char>(line[j + 1]))) {
+                    j++;
+                } else {
+                    break;
+                }
+            }
+            paint(i, j, COLOR_PAIR(2));
+            i = j;
+            continue;
+        }
+
+        if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
+            size_t j = i + 1;
+            while (j < line.length() && isWordChar(line[j])) {
                 j++;
             }
-            for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
-                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, COLOR_PAIR(2));
+            if (keywords.count(line.substr(i, j - i))) {
+                paint(i, j, COLOR_PAIR(1) | A_BOLD);
             }
             i = j;
             continue;
         }
 
-        if (std::isalpha(static_cast<unsigned char>(line[i])) || line[i] == '_') {
-            size_t j = i + 1;
-            while (j < line.length() && (std::isalnum(static_cast<unsigned char>(line[j])) || line[j] == '_')) {
-                j++;
-            }
-            std::string word = line.substr(i, j - i);
-            chtype attr = keywords.count(word) ? (COLOR_PAIR(1) | A_BOLD) : 0;
-            for (size_t k = i; k < j && startX + static_cast<int>(k) < COLS; ++k) {
-                bool sel = isSelected(logicalLine, colOffset + static_cast<int>(k));
-                printCharWithSelection(screenY, startX + static_cast<int>(k), line[k], sel, attr);
-            }
-            i = j;
-            continue;
-        }
-
-        bool sel = isSelected(logicalLine, colOffset + static_cast<int>(i));
-        printCharWithSelection(screenY, startX + static_cast<int>(i), line[i], sel, 0);
         i++;
+    }
+
+    return depth;
+}
+
+static void printHighlightedRow(
+    int screenY,
+    int startX,
+    const std::string &displayText,
+    int colOffset,
+    int logicalLine,
+    const std::function<bool(int, int)> &isSelected,
+    const std::vector<chtype> &attrs
+) {
+    for (size_t k = 0; k < displayText.length() && startX + static_cast<int>(k) < COLS; ++k) {
+        const size_t col = static_cast<size_t>(colOffset) + k;
+        const chtype attr = col < attrs.size() ? attrs[col] : 0;
+        printCharWithSelection(screenY, startX + static_cast<int>(k), displayText[k],
+                               isSelected(logicalLine, static_cast<int>(col)), attr);
     }
 }
 
@@ -314,12 +340,11 @@ void render(
     int runningDepth = 0;
     if (doc.mode == TuiMode::Code) {
         for (int l = 0; l < doc.scrollLine && l < static_cast<int>(doc.lines.size()); ++l) {
-            for (char c : doc.lines[l]) {
-                if (c == '(' || c == '{' || c == '[') runningDepth++;
-                else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
-            }
+            runningDepth = scanCodeLine(doc.lines[l], runningDepth, nullptr);
         }
     }
+    int scannedLine = -1;
+    std::vector<chtype> lineAttrs;
 
     std::vector<int> wrapStarts;
     int scrollBase = doc.scrollLine;
@@ -382,6 +407,11 @@ void render(
 
         int lastNonSpace = doc.lines[logicalLine].find_last_not_of(" \t");
 
+        if (doc.mode == TuiMode::Code && logicalLine != scannedLine) {
+            runningDepth = scanCodeLine(doc.lines[logicalLine], runningDepth, &lineAttrs);
+            scannedLine = logicalLine;
+        }
+
         if (doc.mode == TuiMode::Code) {
             attron(COLOR_PAIR(3));
             if (!useWrap) {
@@ -401,11 +431,7 @@ void render(
         }
 
         if (doc.mode == TuiMode::Code) {
-            highlightCodeLine(screenY, lineNumWidth, displayText, colOffset, logicalLine, isSelected, runningDepth, lastNonSpace);
-            for (char c : displayText) {
-                if (c == '(' || c == '{' || c == '[') runningDepth++;
-                else if (c == ')' || c == '}' || c == ']') runningDepth = std::max(0, runningDepth - 1);
-            }
+            printHighlightedRow(screenY, lineNumWidth, displayText, colOffset, logicalLine, isSelected, lineAttrs);
         } else {
             for (int x = 0; x < static_cast<int>(displayText.length()) && x + lineNumWidth < COLS; ++x) {
                 int absCol = colOffset + x;
