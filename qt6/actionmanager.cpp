@@ -36,6 +36,13 @@ void ActionManager::syncLayoutModeAction(LayoutMode mode) {
     }
 }
 
+void ActionManager::syncEncodingEolActions(const QString &encoding, EolFormat eol) {
+    for (auto it = m_encodingActions.constBegin(); it != m_encodingActions.constEnd(); ++it) {
+        if (it.key().compare(encoding, Qt::CaseInsensitive) == 0) it.value()->setChecked(true);
+    }
+    if (m_eolActions.contains(eol)) m_eolActions[eol]->setChecked(true);
+}
+
 void ActionManager::setFormatMenuVisible(bool visible) {
     if (m_formatMenu) {
         m_formatMenu->menuAction()->setVisible(visible);
@@ -83,6 +90,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         QAction *act = new QAction(enc, m_window);
         act->setCheckable(true);
         encGrp->addAction(act);
+        m_encodingActions[enc] = act;
         if (enc == "UTF-8") act->setChecked(true);
         encMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, enc](){
@@ -99,6 +107,7 @@ void ActionManager::setupMenus(QMenuBar *menuBar) {
         QAction *act = new QAction(label, m_window);
         act->setCheckable(true);
         eolGrp->addAction(act);
+        m_eolActions[eol] = act;
         if (check) act->setChecked(true);
         eolMenu->addAction(act);
         connect(act, &QAction::triggered, this, [this, eol](){

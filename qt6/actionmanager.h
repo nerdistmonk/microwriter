@@ -24,6 +24,7 @@ public:
     const QList<QAction*>& allMenuActions() const { return m_allMenuActions; }
     void syncLayoutModeAction(LayoutMode mode);
     void setFormatMenuVisible(bool visible);
+    void syncEncodingEolActions(const QString &encoding, EolFormat eol);
     void updateFormatMenuActions(bool isRich, bool isMarkdown = false);
 
 private:
@@ -35,6 +36,8 @@ private:
     QMap<QString, QAction*> m_actionMap;
     QActionGroup *m_layoutGrp;
     QMap<LayoutMode, QAction*> m_layoutActions;
+    QMap<QString, QAction*> m_encodingActions;
+    QMap<EolFormat, QAction*> m_eolActions;
 };
 
 #endif // ACTIONMANAGER_H

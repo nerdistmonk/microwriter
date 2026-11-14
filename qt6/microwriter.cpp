@@ -876,6 +876,8 @@ void MicroWriter::updateWindowTitleAndStats() {
     if (base->isModified()) fname += " *";
     setWindowTitle(QString("%1 - MicroWriter").arg(fname));
 
+    if (actionManager) actionManager->syncEncodingEolActions(base->encodingName(), base->eolFormat());
+
     if (statusLabel) {
         EditorStats s = base->getStats();
         QString eolStr = "LF";
