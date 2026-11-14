@@ -234,6 +234,7 @@ bool showSaveAsModal(std::string &filePath, int &formatType, bool &stripFormatti
     int focusField = 0; // 0 = File name input, 1 = Format selector, 2 = Strip formatting toggle
     std::string inputName = filePath;
     int currentFmt = formatType; // 0 = HTML (.html), 1 = Plain Text (.txt)
+    if (currentFmt == 2) currentFmt = 1; // caller passes 2 for .txt files
     if (currentFmt < 0 || currentFmt > 1) currentFmt = 0;
     bool doStrip = stripFormatting;
 
